@@ -1,98 +1,314 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  ActivityIndicator,
+  StyleSheet
+} from 'react-native';
+import { useRouter } from 'expo-router';
+import { supabase } from '../../lib/supabaseClient';
+import { ChatRoom } from '../../types/chat';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+export default function ChatListScreen() {
+  const router = useRouter();
+  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
+  const [loading, setLoading] = useState(true);
 
-export default function HomeScreen() {
+  useEffect(() => {
+    fetchChatRooms();
+    subscribeToNewMessages();
+  }, []);
+
+  // دریافت لیست چت‌ها از دیتابیس
+  const fetchChatRooms = async () => {
+    try {
+      setLoading(true);
+
+      // دریافت آخرین پیام هر اتاق چت از دیتابیس
+      const { data, error } = await supabase
+        .from('messages')
+        .select('chat_room_id, content, created_at')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('خطا در دریافت چت‌ها:', error);
+        // اگر خطا خورد، از داده‌های تستی استفاده کن
+        setChatRooms(getTestData());
+        return;
+      }
+
+      if (data && data.length > 0) {
+        // تبدیل داده‌های دیتابیس به فرمت ChatRoom
+        const chatRoomsFromDb = processChatRoomsFromMessages(data);
+        setChatRooms(chatRoomsFromDb);
+      } else {
+        // اگر داده‌ای نبود، از داده‌های تستی استفاده کن
+        setChatRooms(getTestData());
+      }
+
+    } catch (error) {
+      console.error('خطا:', error);
+      setChatRooms(getTestData());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // گوش دادن به پیام‌های جدید برای آپدیت لیست چت‌ها
+  const subscribeToNewMessages = () => {
+    const subscription = supabase
+      .channel('new-messages')
+      .on('postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages'
+        },
+        (payload) => {
+          console.log('پیام جدید برای آپدیت لیست:', payload);
+          // وقتی پیام جدید میاد، لیست رو آپدیت کن
+          fetchChatRooms();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  };
+
+  // تابع کمکی برای پردازش داده‌های دیتابیس
+  const processChatRoomsFromMessages = (messages: any[]): ChatRoom[] => {
+    const roomMap = new Map();
+
+    messages.forEach(message => {
+      if (!roomMap.has(message.chat_room_id)) {
+        roomMap.set(message.chat_room_id, {
+          id: message.chat_room_id,
+          created_at: message.created_at,
+          last_message: message.content,
+          last_message_at: message.created_at,
+          other_user_name:` کاربر ${ message.chat_room_id }`
+        });
+  }
+});
+
+return Array.from(roomMap.values());
+  };
+
+// داده‌های تستی برای وقتی که دیتابیس خالیه
+const getTestData = (): ChatRoom[] => [
+  {
+    id: '1',
+    created_at: new Date().toISOString(),
+    last_message: 'سلام! چطوری؟',
+    last_message_at: new Date().toISOString(),
+    other_user_name: 'علی'
+  },
+  {
+    id: '2',
+    created_at: new Date().toISOString(),
+    last_message: 'فردا جلسه داریم',
+    last_message_at: new Date().toISOString(),
+    other_user_name: 'رضا'
+  },
+  {
+    id: '3',
+    created_at: new Date().toISOString(),
+    last_message: 'پروژه رو دیدم، عالی بود!',
+    last_message_at: new Date().toISOString(),
+    other_user_name: 'سارا'
+  },
+  {
+    id: '4',
+    created_at: new Date().toISOString(),
+    last_message: 'کی میای دفتر؟',
+    last_message_at: new Date().toISOString(),
+    other_user_name: 'محمد'
+  }
+];
+
+// محاسبه زمان نسبی برای نمایش
+const getRelativeTime = (dateString: string) => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
+
+  if (diffInHours < 1) {
+    return 'همین الان';
+  } else if (diffInHours < 24) {
+    return `${ Math.floor(diffInHours) } ساعت پیش`;
+  } else {
+    return `${ Math.floor(diffInHours / 24) } روز پیش`;
+  }
+}; if (loading) {
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
-
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    <View style={styles.center}>
+      <ActivityIndicator size="large" color="#007AFF" />
+      <Text style={styles.loadingText}>در حال بارگذاری مکالمات...</Text>
+    </View>
   );
 }
 
+return (
+  <View style={styles.container}>
+    <View style={styles.header}>
+      <Text style={styles.title}>💬 مکالمات من</Text>
+      <Text style={styles.subtitle}>{chatRooms.length} مکالمه</Text>
+    </View>
+
+    <FlatList
+      data={chatRooms}
+      keyExtractor={(item) => item.id}
+      renderItem={({ item }) => (
+        <TouchableOpacity
+          style={styles.chatItem}
+          onPress={() => router.push({
+            pathname: "/chat/[roomId]",
+            params: { roomId: item.id }
+          } as any)}
+        >
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>
+              {item.other_user_name.charAt(0)}
+            </Text>
+          </View>
+
+          <View style={styles.chatInfo}>
+            <Text style={styles.userName}>{item.other_user_name}</Text>
+            <Text style={styles.lastMessage} numberOfLines={1}>
+              {item.last_message}
+            </Text>
+          </View>
+
+          <View style={styles.timeContainer}>
+            <Text style={styles.time}>
+              {getRelativeTime(item.last_message_at)}
+            </Text>
+            {/* <View style={styles.unreadBadge}>
+                <Text style={styles.unreadText}>3</Text>
+              </View> */}
+          </View>
+        </TouchableOpacity>
+      )}
+      ListEmptyComponent={
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>هنوز هیچ مکالمه‌ای ندارید</Text>
+          <Text style={styles.emptySubText}>برای شروع یک چت جدید، با کسی پیام بدهید</Text>
+        </View>
+      }
+    />
+  </View>
+);
+}
+
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+    backgroundColor: '#fff'
+  },
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff'
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#666'
+  },
+  header: {
+    padding: 16,
+    paddingTop: 60,
+    backgroundColor: '#f8f9fa',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef'
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    color: '#1a1a1a'
+  },
+  subtitle: {
+    fontSize: 14,
+    textAlign: 'center',
+    color: '#666',
+    marginTop: 4
+  },
+  chatItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0'
   },
-  stepContainer: {
-    gap: 8,
+  avatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12
+  },
+  avatarText: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: 'bold'
+  },
+  chatInfo: {
+    flex: 1
+  },
+  userName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+    color: '#1a1a1a'
+  },
+  lastMessage: {
+    fontSize: 14,
+    color: '#666'
+  },
+  timeContainer: {
+    alignItems: 'flex-end'
+  },
+  time: {
+    fontSize: 12,
+    color: '#999',
+    marginBottom: 4
+  },
+  unreadBadge: {
+    backgroundColor: '#007AFF',
+    borderRadius: 12,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  unreadText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold'
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 100
+  },
+  emptyText: {
+    fontSize: 18,
+    color: '#666',
     marginBottom: 8,
+    textAlign: 'center'
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
+  emptySubText: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center'
+  }
 });
