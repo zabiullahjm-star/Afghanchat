@@ -120,7 +120,7 @@ export default function ContactsScreen() {
             } as any);
 
         } catch (error) {
-            Alert.alert('خطا', 'مشکلی در شروع چت پیش آمد');
+            Alert.alert('خطا', '.مشکلی در شروع چت پیش آمد');
         }
     };
 
