@@ -6,7 +6,10 @@ import {
     TouchableOpacity,
     StyleSheet,
     Alert,
-    ActivityIndicator
+    ActivityIndicator,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
@@ -18,8 +21,18 @@ export default function LoginScreen() {
     const [password, setPassword] = useState('');
 
     const handleLogin = async () => {
-        if (!email || !password) {
-            Alert.alert('خطا', 'لطفا ایمیل و رمز عبور را وارد کنید');
+        if (!email.trim()) {
+            Alert.alert('خطا', 'لطفا ایمیل خود را وارد کنید');
+            return;
+        }
+
+        if (!password) {
+            Alert.alert('خطا', 'لطفا رمز عبور خود را وارد کنید');
+            return;
+        }
+
+        if (password.length < 6) {
+            Alert.alert('خطا', 'رمز عبور باید حداقل ۶ کاراکتر باشد');
             return;
         }
 
@@ -36,8 +49,8 @@ export default function LoginScreen() {
             }
 
             if (data.user) {
+                Alert.alert('موفق', 'ورود موفقیت‌آمیز بود!');
                 // به صورت خودکار به صفحه اصلی هدایت می‌شه
-                console.log('ورود موفقیت‌آمیز:', data.user);
             }
 
         } catch (error: any) {
@@ -47,53 +60,90 @@ export default function LoginScreen() {
         }
     };
 
+    const handleForgotPassword = () => {
+        Alert.alert('بازیابی رمز عبور', 'این قابلیت به زودی اضافه خواهد شد');
+    };
+
     return (
-        <View style={styles.container}>
-            <View style={styles.header}>
-                <Text style={styles.title}>ورود به AfghanChat</Text>
-                <Text style={styles.subtitle}>به حساب کاربری خود وارد شوید</Text>
-            </View>
+        <KeyboardAvoidingView
+            style={styles.container}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+            <ScrollView contentContainerStyle={styles.scrollContent}>
+                <View style={styles.header}>
+                    <Text style={styles.title}>خوش آمدید</Text>
+                    <Text style={styles.subtitle}>به AfghanChat وارد شوید</Text>
+                </View>
 
-            <View style={styles.form}>
-                <TextInput
-                    style={styles.input}
-                    placeholder="ایمیل"
-                    value={email}
-                    onChangeText={setEmail}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                />
+                <View style={styles.form}>
+                    <View style={styles.inputContainer}>
+                        <Text style={styles.inputLabel}>ایمیل</Text>
+                        <TextInput
+                            style={styles.input}
+                            placeholder="example@email.com"
+                            value={email}
+                            onChangeText={setEmail}
+                            keyboardType="email-address"
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                        />
+                    </View>
 
-                <TextInput
-                    style={styles.input}
-                    placeholder="رمز عبور"
-                    value={password}
-                    onChangeText={setPassword}
-                    secureTextEntry
-                />
+                    <View style={styles.inputContainer}>
+                        <Text style={styles.inputLabel}>رمز عبور</Text>
+                        <TextInput
+                            style={styles.input}
+                            placeholder="رمز عبور خود را وارد کنید"
+                            value={password}
+                            onChangeText={setPassword}
+                            secureTextEntry
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                        />
+                    </View>
 
-                <TouchableOpacity
-                    style={[styles.button, loading && styles.buttonDisabled]}
-                    onPress={handleLogin}
-                    disabled={loading}
-                >
-                    {loading ? (
-                        <ActivityIndicator color="white" />
-                    ) : (
-                        <Text style={styles.buttonText}>ورود</Text>
-                    )}
-                </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.forgotPasswordButton}
+                        onPress={handleForgotPassword}
+                    >
+                        <Text style={styles.forgotPasswordText}>
+                            رمز عبور خود را فراموش کرده‌اید؟
+                        </Text>
+                    </TouchableOpacity>
 
-                <TouchableOpacity
-                    style={styles.linkButton}
-                    onPress={() => router.push('/signup')}
-                >
-                    <Text style={styles.linkText}>
-                        حساب ندارید؟ ثبت‌نام کنید
+                    <TouchableOpacity
+                        style={[styles.loginButton, loading && styles.buttonDisabled]}
+                        onPress={handleLogin}
+                        disabled={loading}
+                    >
+                        {loading ? (
+                            <ActivityIndicator color="white" />
+                        ) : (
+                            <Text style={styles.loginButtonText}>ورود به حساب</Text>
+                        )}
+                    </TouchableOpacity>
+
+                    <View style={styles.divider}>
+                        <View style={styles.dividerLine} />
+                        <Text style={styles.dividerText}>یا</Text>
+                        <View style={styles.dividerLine} />
+                    </View>
+
+                    <TouchableOpacity
+                        style={styles.signupButton}
+                        onPress={() => router.push('/signup' as any)}
+                    >
+                        <Text style={styles.signupButtonText}>
+                            ساخت حساب کاربری جدید
+                        </Text>
+                    </TouchableOpacity>
+                </View><View style={styles.footer}>
+                    <Text style={styles.footerText}>
+                        با ورود به AfghanChat با شرایط و قوانین موافقت می‌کنید
                     </Text>
-                </TouchableOpacity>
-            </View>
-        </View>
+                </View>
+            </ScrollView>
+        </KeyboardAvoidingView>
     );
 }
 
@@ -101,53 +151,106 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#fff',
-        padding: 24
+    },
+    scrollContent: {
+        flexGrow: 1,
+        padding: 24,
+        justifyContent: 'center',
     },
     header: {
         alignItems: 'center',
-        marginTop: 80,
-        marginBottom: 40
+        marginBottom: 48,
     },
     title: {
-        fontSize: 24,
+        fontSize: 28,
         fontWeight: 'bold',
-        marginBottom: 8
+        marginBottom: 8,
+        color: '#1a1a1a',
     },
     subtitle: {
         fontSize: 16,
-        color: '#666'
+        color: '#666',
+        textAlign: 'center',
     },
     form: {
-        flex: 1
+        width: '100%',
+    },
+    inputContainer: {
+        marginBottom: 20,
+    },
+    inputLabel: {
+        fontSize: 14,
+        fontWeight: '600',
+        marginBottom: 8,
+        color: '#333',
     },
     input: {
-        backgroundColor: '#f5f5f5',
+        backgroundColor: '#f8f9fa',
         padding: 16,
-        borderRadius: 8,
-        marginBottom: 16,
-        fontSize: 16
+        borderRadius: 12,
+        fontSize: 16,
+        borderWidth: 1,
+        borderColor: '#e9ecef',
     },
-    button: {
+    forgotPasswordButton: {
+        alignSelf: 'flex-start',
+        marginBottom: 24,
+    },
+    forgotPasswordText: {
+        color: '#007AFF',
+        fontSize: 14,
+        fontWeight: '500',
+    },
+    loginButton: {
         backgroundColor: '#007AFF',
         padding: 16,
-        borderRadius: 8,
+        borderRadius: 12,
         alignItems: 'center',
-        marginBottom: 16
+        marginBottom: 20,
     },
     buttonDisabled: {
-        opacity: 0.6
+        opacity: 0.6,
     },
-    buttonText: {
+    loginButtonText: {
         color: 'white',
         fontSize: 16,
-        fontWeight: 'bold'
+        fontWeight: 'bold',
     },
-    linkButton: {
+    divider: {
+        flexDirection: 'row',
         alignItems: 'center',
-        padding: 16
+        marginBottom: 20,
     },
-    linkText: {
+    dividerLine: {
+        flex: 1,
+        height: 1,
+        backgroundColor: '#e9ecef',
+    },
+    dividerText: {
+        paddingHorizontal: 16,
+        color: '#666',
+        fontSize: 14,
+    },
+    signupButton: {
+        backgroundColor: '#f8f9fa',
+        padding: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#007AFF',
+    },
+    signupButtonText: {
         color: '#007AFF',
-        fontSize: 16
-    }
+        fontSize: 16,
+        fontWeight: 'bold',
+    },
+    footer: {
+        marginTop: 32,
+        alignItems: 'center',
+    },
+    footerText: {
+        fontSize: 12,
+        color: '#999',
+        textAlign: 'center',
+    },
 });
