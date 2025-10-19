@@ -6,7 +6,8 @@ import {
     TouchableOpacity,
     TextInput,
     StyleSheet,
-    ActivityIndicator
+    ActivityIndicator,
+    Alert
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
@@ -28,24 +29,50 @@ export default function ContactsScreen() {
 
     useEffect(() => {
         fetchPersons();
-        subscribeToPresence();
     }, []);
 
     const fetchPersons = async () => {
         try {
             setLoading(true);
-            const { data, error } = await supabase
-                .from('persons')
-                .select('*')
-                .order('is_online', { ascending: false })
-                .order('name');
 
-            if (error) {
-                console.error('خطا در دریافت مخاطبین:', error);
-                return;
-            }
+            // فعلاً از داده‌های تستی استفاده می‌کنیم
+            const testData: Person[] = [
+                {
+                    id: 'user2',
+                    name: 'سارا محمدی',
+                    username: 'sara_mohammadi',
+                    avatar_url: null,
+                    is_online: true,
+                    last_seen: new Date().toISOString()
+                },
+                {
+                    id: 'user3',
+                    name: 'رضا کریمی',
+                    username: 'reza_karimi',
+                    avatar_url: null,
+                    is_online: false,
+                    last_seen: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() // 2 ساعت پیش
+                },
+                {
+                    id: 'user4',
+                    name: 'نازنین احمدی',
+                    username: 'nazanin_ahmadi',
+                    avatar_url: null,
+                    is_online: true,
+                    last_seen: new Date().toISOString()
+                },
+                {
+                    id: 'user5',
+                    name: 'امیر حسینی',
+                    username: 'amir_hosseini',
+                    avatar_url: null,
+                    is_online: true,
+                    last_seen: new Date().toISOString()
+                }
+            ];
 
-            setPersons(data || []);
+            setPersons(testData);
+
         } catch (error) {
             console.error('خطا:', error);
         } finally {
@@ -53,41 +80,48 @@ export default function ContactsScreen() {
         }
     };
 
-    const subscribeToPresence = () => {
-        const subscription = supabase
-            .channel('presence')
-            .on('postgres_changes',
-                {
-                    event: '*',
-                    schema: 'public',
-                    table: 'persons'
-                },
-                () => {
-                    fetchPersons(); // آپدیت وضعیت آنلاین
-                }
-            )
-            .subscribe();
-
-        return () => subscription.unsubscribe();
-    };
-
     const filteredPersons = persons.filter(person =>
         person.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         person.username.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    const startChat = (person: Person) => {
-        // ساخت یک roomId منحصر به فرد براساس ID کاربران
-        const roomId = `room_${['user1', person.id].sort().join('_')
-            }`;
+    const startChat = async (person: Person) => {
+        try {
+            // ساخت یک roomId منحصر به فرد
+            const roomId = `room_${['user1', person.id].sort().join('_')
+                }`;
 
-        router.push({
-            pathname: "/chat/[roomId]",
-            params: {
-                roomId,
-                otherUserName: person.name
+            // بررسی آیا اتاق چت از قبل وجود داره
+            const { data: existingMessages } = await supabase
+                .from('messages')
+                .select('id')
+                .eq('chat_room_id', roomId)
+                .limit(1);
+
+            // اگر اتاق وجود نداره، یک پیام خوش‌آمدگویی ایجاد کن
+            if (!existingMessages || existingMessages.length === 0) {
+                await supabase.from('messages').insert([
+                    {
+                        chat_room_id: roomId,
+                        sender_id: 'system',
+                        content: ` چت با ${person.name} شروع شد`,
+                        message_type: 'system'
+                    }
+                ]);
             }
-        } as any);
+
+            // برو به صفحه چت
+            router.push({
+                pathname: "/chat/[roomId]",
+                params: {
+                    roomId,
+                    otherUserName: person.name
+                }
+            } as any);
+
+        } catch (error) {
+            Alert.alert('خطا', 'مشکلی در شروع چت پیش آمد');
+        }
     };
 
     const getStatusText = (person: Person) => {
@@ -116,9 +150,7 @@ export default function ContactsScreen() {
             <View style={styles.header}>
                 <Text style={styles.title}>👥 مخاطبین</Text>
                 <Text style={styles.subtitle}>{persons.length} مخاطب</Text>
-            </View>
-
-            {/* نوار جستجو */}
+            </View>{/* نوار جستجو */}
             <View style={styles.searchContainer}>
                 <TextInput
                     style={styles.searchInput}
@@ -148,7 +180,9 @@ export default function ContactsScreen() {
                         <View style={styles.contactInfo}>
                             <Text style={styles.contactName}>{item.name}</Text>
                             <Text style={styles.contactUsername}>@{item.username}</Text>
-                        </View><View style={styles.statusContainer}>
+                        </View>
+
+                        <View style={styles.statusContainer}>
                             <Text style={[
                                 styles.statusText,
                                 item.is_online ? styles.onlineText : styles.offlineText
