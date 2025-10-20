@@ -9,13 +9,22 @@ export default function RootLayout() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // بررسی session فعلی
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
-    });
+    // تابع برای بررسی session
+    const checkSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        setSession(session);
+      } catch (error) {
+        console.error('Error checking session:', error);
+        setSession(null);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    // گوش دادن به تغییرات auth state
+    checkSession();
+
+    // گوش دادن به تغییرات auth
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setLoading(false);
@@ -26,23 +35,23 @@ export default function RootLayout() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
         <ActivityIndicator size="large" color="#007AFF" />
-        <Text>در حال بارگذاری...</Text>
+        <Text style={{ marginTop: 12 }}>در حال بارگذاری...</Text>
       </View>
     );
   }
 
   return (
-    <Stack>
+    <Stack screenOptions={{ headerShown: false }}>
       {!session ? (
-        // کاربر لاگین نکرده - صفحات احراز هویت
-        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+        // کاربر لاگین نکرده
+        <Stack.Screen name="(auth)" />
       ) : (
-        // کاربر لاگین کرده - صفحات اصلی
+        // کاربر لاگین کرده
         <>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="chat/[roomId]" options={{ title: 'چت' }} />
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="chat/[roomId]" options={{ headerShown: true, title: 'چت' }} />
         </>
       )}
     </Stack>

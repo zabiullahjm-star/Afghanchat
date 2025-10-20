@@ -11,14 +11,13 @@ import {
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
 import { Profile } from '../../types/chat';
-import { User } from '@supabase/supabase-js'; // import از سوپابیس
+import { User } from '@supabase/supabase-js';
 
 export default function ProfileScreen() {
     const router = useRouter();
     const [user, setUser] = useState<User | null>(null);
     const [profile, setProfile] = useState<Profile | null>(null);
     const [loading, setLoading] = useState(true);
-    const [saving, setSaving] = useState(false);
 
     useEffect(() => {
         fetchUserData();
@@ -28,60 +27,24 @@ export default function ProfileScreen() {
         try {
             setLoading(true);
 
-            // گرفتن اطلاعات کاربر لاگین کرده
             const { data: { user } } = await supabase.auth.getUser();
 
             if (user) {
                 setUser(user);
 
-                // گرفتن پروفایل کاربر از جدول profiles
-                const { data: profile, error } = await supabase
+                const { data: profile } = await supabase
                     .from('profiles')
                     .select('*')
                     .eq('id', user.id)
                     .single();
 
-                if (error && error.code !== 'PGRST116') { // PGRST116 یعنی رکورد پیدا نشد
-                    console.error('خطا در دریافت پروفایل:', error);
-                }
-
-                // اگر پروفایل وجود نداشت، ایجادش کن
-                if (!profile) {
-                    await createProfile(user);
-                } else {
-                    setProfile(profile);
-                }
+                setProfile(profile);
             }
 
         } catch (error) {
             console.error('خطا در دریافت اطلاعات کاربر:', error);
         } finally {
             setLoading(false);
-        }
-    };
-
-    const createProfile = async (user: User) => {
-        try {
-            const newProfile = {
-                id: user.id,
-                username: user.email?.split('@')[0] || 'user',
-                full_name: user.user_metadata?.full_name || 'کاربر جدید',
-                avatar_url: null,
-                phone: null
-            };
-
-            const { data, error } = await supabase
-                .from('profiles')
-                .insert([newProfile])
-                .select()
-                .single();
-
-            if (error) throw error;
-
-            setProfile(data);
-
-        } catch (error) {
-            console.error('خطا در ایجاد پروفایل:', error);
         }
     };
 
@@ -102,40 +65,46 @@ export default function ProfileScreen() {
         );
     };
 
-    const updateProfile = async (updates: Partial<Profile>) => {
-        if (!user) return;
-
-        try {
-            setSaving(true);
-
-            const { data, error } = await supabase
-                .from('profiles')
-                .update(updates)
-                .eq('id', user.id)
-                .select()
-                .single();
-
-            if (error) throw error;
-
-            setProfile(data);
-            Alert.alert('موفق', 'پروفایل با موفقیت به‌روزرسانی شد');
-
-        } catch (error: any) {
-            Alert.alert('خطا', error.message || 'خطا در به‌روزرسانی پروفایل');
-        } finally {
-            setSaving(false);
-        }
+    const handleLogin = () => {
+        router.push('/login' as any);
     };
 
     if (loading) {
         return (
             <View style={styles.center}>
                 <ActivityIndicator size="large" color="#007AFF" />
-                <Text>در حال بارگذاری پروفایل...</Text>
+                <Text>در حال بارگذاری...</Text>
             </View>
         );
     }
 
+    // اگر کاربر لاگین نکرده
+    if (!user) {
+        return (
+            <View style={styles.container}>
+                <View style={styles.header}>
+                    <Text style={styles.title}>👤 پروفایل</Text>
+                </View>
+
+                <View style={styles.notLoggedInContainer}>
+                    <Text style={styles.notLoggedInTitle}>وارد حساب خود شوید</Text>
+                    <Text style={styles.notLoggedInText}>
+                        برای مشاهده پروفایل و استفاده از امکانات AfghanChat باید وارد حساب کاربری خود شوید.
+                    </Text>
+
+                    <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
+                        <Text style={styles.loginButtonText}>ورود به حساب</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={styles.signupButton} onPress={() => router.push('/signup' as any)}>
+                        <Text style={styles.signupButtonText}>ثبت‌نام در AfghanChat</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        );
+    }
+
+    // اگر کاربر لاگین کرده
     return (
         <ScrollView style={styles.container}>
             <View style={styles.header}>
@@ -151,17 +120,15 @@ export default function ProfileScreen() {
                 </View>
 
                 <Text style={styles.userName}>
-                    {profile?.full_name || 'کاربر جدید'}
+                    {profile?.full_name || 'کاربر AfghanChat'}
                 </Text>
 
                 <Text style={styles.userEmail}>
                     {user?.email || 'ایمیل نامشخص'}
                 </Text>
+            </View>
 
-                <Text style={styles.userId}>
-                    شناسه: {user?.id?.substring(0, 8)}...
-                </Text>
-            </View>{/* اطلاعات حساب */}
+            {/* اطلاعات حساب */}
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>📋 اطلاعات حساب</Text>
 
@@ -172,16 +139,8 @@ export default function ProfileScreen() {
                     </Text>
                 </View>
 
-                <View style={styles.infoItem}>
-                    <Text style={styles.infoLabel}>ایمیل:</Text>
+                <View style={styles.infoItem}><Text style={styles.infoLabel}>ایمیل:</Text>
                     <Text style={styles.infoValue}>{user?.email}</Text>
-                </View>
-
-                <View style={styles.infoItem}>
-                    <Text style={styles.infoLabel}>شماره تلفن:</Text>
-                    <Text style={styles.infoValue}>
-                        {profile?.phone || 'تعیین نشده'}
-                    </Text>
                 </View>
 
                 <View style={styles.infoItem}>
@@ -192,47 +151,18 @@ export default function ProfileScreen() {
                 </View>
             </View>
 
-            {/* منو */}
-            <View style={styles.section}>
-                <Text style={styles.sectionTitle}>⚙️ تنظیمات</Text>
-
-                <TouchableOpacity style={styles.menuItem}>
-                    <Text style={styles.menuText}>✏️ ویرایش پروفایل</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.menuItem}>
-                    <Text style={styles.menuText}>🔐 تغییر رمز عبور</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.menuItem}>
-                    <Text style={styles.menuText}>🔔 تنظیمات نوتیفیکیشن</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.menuItem}>
-                    <Text style={styles.menuText}>🌙 حالت تاریک</Text>
-                </TouchableOpacity>
-            </View>
-
             {/* دکمه خروج */}
             <TouchableOpacity
                 style={styles.logoutButton}
                 onPress={handleLogout}
-                disabled={saving}
             >
-                {saving ? (
-                    <ActivityIndicator color="white" />
-                ) : (
-                    <Text style={styles.logoutText}>🚪 خروج از حساب</Text>
-                )}
+                <Text style={styles.logoutText}>🚪 خروج از حساب</Text>
             </TouchableOpacity>
-
-            {/* نسخه برنامه */}
-            <View style={styles.versionContainer}>
-                <Text style={styles.versionText}>AfghanChat v1.0.0</Text>
-            </View>
         </ScrollView>
     );
 }
+
+// استایل‌ها همون قبلی...</View>
 
 const styles = StyleSheet.create({
     container: {
@@ -252,6 +182,54 @@ const styles = StyleSheet.create({
     },
     title: {
         fontSize: 24,
+        fontWeight: 'bold'
+    },
+    // استایل‌های جدید برای حالت لاگین نکرده
+    notLoggedInContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 24
+    },
+    notLoggedInTitle: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        marginBottom: 16,
+        color: '#1a1a1a',
+        textAlign: 'center'
+    },
+    notLoggedInText: {
+        fontSize: 16,
+        color: '#666',
+        textAlign: 'center',
+        marginBottom: 32,
+        lineHeight: 24
+    },
+    loginButton: {
+        backgroundColor: '#007AFF',
+        padding: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        marginBottom: 12,
+        width: '100%'
+    },
+    loginButtonText: {
+        color: 'white',
+        fontSize: 16,
+        fontWeight: 'bold'
+    },
+    signupButton: {
+        backgroundColor: '#f8f9fa',
+        padding: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#007AFF',
+        width: '100%'
+    },
+    signupButtonText: {
+        color: '#007AFF',
+        fontSize: 16,
         fontWeight: 'bold'
     },
     profileCard: {
