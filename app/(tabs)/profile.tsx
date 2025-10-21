@@ -135,7 +135,7 @@ export default function ProfileScreen() {
                 <View style={styles.infoItem}>
                     <Text style={styles.infoLabel}>نام کاربری:</Text>
                     <Text style={styles.infoValue}>
-                        {profile?.username || 'تعیین نشده'}
+                        {profile?.username || 'we will know'}
                     </Text>
                 </View>
 
