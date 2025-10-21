@@ -21,7 +21,8 @@ export default function SignUpScreen() {
         fullName: '',
         email: '',
         password: '',
-        confirmPassword: ''
+        confirmPassword: '',
+        phone: '',
     });
 
     const handleSignUp = async () => {
@@ -60,6 +61,7 @@ export default function SignUpScreen() {
                 options: {
                     data: {
                         full_name: formData.fullName.trim(),
+                        phone: formData.phone.trim()
                     }
                 }
             });
@@ -238,6 +240,11 @@ const styles = StyleSheet.create({
         fontSize: 16,
         borderWidth: 1,
         borderColor: '#e9ecef',
+    },
+    helperText: {
+        fontSize: 12,
+        color: '#666',
+        marginTop: 4
     },
     signupButton: {
         backgroundColor: '#007AFF',

@@ -139,6 +139,14 @@ export default function ProfileScreen() {
                     </Text>
                 </View>
 
+                // در بخش اطلاعات حساب، شماره تلفن رو نشون بده
+                <View style={styles.infoItem}>
+                    <Text style={styles.infoLabel}>شماره تلفن:</Text>
+                    <Text style={styles.infoValue}>
+                        {profile?.phone || 'ثبت نشده'}
+                    </Text>
+                </View>
+
                 <View style={styles.infoItem}><Text style={styles.infoLabel}>ایمیل:</Text>
                     <Text style={styles.infoValue}>{user?.email}</Text>
                 </View>

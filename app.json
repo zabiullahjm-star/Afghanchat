@@ -8,6 +8,14 @@
     "scheme": "afghanchat",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "enabled": true,
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/251bb75c-60b5-4452-adbb-6455d8c3dfb6"
+    },
     "ios": {
       "supportsTablet": true
     },

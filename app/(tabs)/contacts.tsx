@@ -19,6 +19,8 @@ interface Person {
     avatar_url: string | null;
     is_online: boolean;
     last_seen: string;
+    phone?: string;
+    englishName?: string;
 }
 
 export default function ContactsScreen() {
@@ -39,7 +41,7 @@ export default function ContactsScreen() {
             const testData: Person[] = [
                 {
                     id: 'user2',
-                    name: 'سارا محمدی',
+                    name: 'نصرت تریدر',
                     username: 'sara_mohammadi',
                     avatar_url: null,
                     is_online: true,
@@ -47,7 +49,7 @@ export default function ContactsScreen() {
                 },
                 {
                     id: 'user3',
-                    name: 'رضا کریمی',
+                    name: 'هجرت',
                     username: 'reza_karimi',
                     avatar_url: null,
                     is_online: false,
@@ -55,7 +57,7 @@ export default function ContactsScreen() {
                 },
                 {
                     id: 'user4',
-                    name: 'نازنین احمدی',
+                    name: 'ستاره',
                     username: 'nazanin_ahmadi',
                     avatar_url: null,
                     is_online: true,
@@ -63,7 +65,7 @@ export default function ContactsScreen() {
                 },
                 {
                     id: 'user5',
-                    name: 'امیر حسینی',
+                    name: 'علی رضا',
                     username: 'amir_hosseini',
                     avatar_url: null,
                     is_online: true,
@@ -80,10 +82,67 @@ export default function ContactsScreen() {
         }
     };
 
-    const filteredPersons = persons.filter(person =>
-        person.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        person.username.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const filteredPersons = persons.filter(person => {
+        const query = searchQuery.toLowerCase().trim();
+
+        if (!query) return false;
+
+        // جستجو در نام کامل (با حذف فاصله‌ها)
+        const cleanName = person.name.replace(/\s+/g, '').toLowerCase();
+        const cleanQuery = query.replace(/\s+/g, '');
+
+        // جستجو در نام کاربری (حذف @ اگر وجود دارد)
+        const cleanUsername = person.username.replace('@', '').toLowerCase();
+
+        // جستجو در شماره تلفن (حذف کاراکترهای غیرعددی)
+        const cleanPhone = person.phone?.replace(/[^\d]/g, '') || '';
+        const cleanPhoneQuery = query.replace(/[^\d]/g, '');
+
+        return (
+            // جستجوی مستقیم در نام
+            person.name.toLowerCase().includes(query) ||
+            cleanName.includes(cleanQuery) ||
+
+            // جستجو در نام کاربری
+            person.username.toLowerCase().includes(query) ||
+            cleanUsername.includes(cleanQuery) ||
+
+            // جستجو در شماره تلفن
+            (person.phone && (
+                person.phone.includes(query) ||
+                cleanPhone.includes(cleanPhoneQuery) ||
+                // جستجو با فرمت‌های مختلف شماره
+                person.phone.replace(/\s+/g, '').includes(cleanPhoneQuery) ||
+                person.phone.replace(/[^\d]/g, '').includes(cleanPhoneQuery) ||
+                // جستجوی معکوس (اگر کاربر 0 اول رو نزده)
+                (cleanPhoneQuery.startsWith('9') && cleanPhone.endsWith(cleanPhoneQuery))
+            )) ||
+
+            // جستجوی فازی در نام (برای غلط‌های املایی)
+            (query.length > 2 && (
+                person.name.toLowerCase().includes(query.substring(0, query.length - 1)) ||
+                person.name.toLowerCase().includes(query.substring(1)) ||
+                // جستجو در کلمات جداگانه نام
+                person.name.toLowerCase().split(' ').some(word =>
+                    word.includes(query) || query.includes(word)
+                )
+            )) ||
+
+            // جستجو در حروف اول نام
+            (query.length > 1 &&
+                person.name.split(' ')
+                    .map(word => word.charAt(0))
+                    .join('')
+                    .toLowerCase()
+                    .includes(query)
+            ) ||
+
+            // جستجو در نام به انگلیسی (اگر کاربر فارسی تایپ کرده)
+            (person.englishName &&
+                person.englishName.toLowerCase().includes(query)
+            )
+        );
+    });
 
     const startChat = async (person: Person) => {
         try {

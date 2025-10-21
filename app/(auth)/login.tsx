@@ -49,8 +49,9 @@ export default function LoginScreen() {
             }
 
             if (data.user) {
-                Alert.alert('موفق', 'ورود موفقیت‌آمیز بود!');
-                // به صورت خودکار به صفحه اصلی هدایت می‌شه
+                // پیام موفقیت ولی هدایت خودکار توسط _layout.tsx انجام میشه
+                console.log('ورود موفقیت‌آمیز');
+                // صفحه به صورت خودکار توسط Auth State Change آپدیت میشه
             }
 
         } catch (error: any) {

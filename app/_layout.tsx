@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Session } from '@supabase/supabase-js';
 import { ActivityIndicator, View, Text } from 'react-native';
+import UpdateChecker from '../components/UpdateChecker';
 
 export default function RootLayout() {
   const [session, setSession] = useState<Session | null>(null);
@@ -13,6 +14,7 @@ export default function RootLayout() {
     const checkSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
+        console.log('Session checked:', session ? 'User logged in' : 'No user');
         setSession(session);
       } catch (error) {
         console.error('Error checking session:', error);
@@ -25,7 +27,8 @@ export default function RootLayout() {
     checkSession();
 
     // گوش دادن به تغییرات auth
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('Auth state changed:', event, session ? 'User logged in' : 'No user');
       setSession(session);
       setLoading(false);
     });
@@ -42,7 +45,11 @@ export default function RootLayout() {
     );
   }
 
+  console.log('Rendering layout - Session:', session ? 'Exists' : 'None');
+
   return (
+    <View style={{flex: 1}}>
+    <UpdateChecker/>
     <Stack screenOptions={{ headerShown: false }}>
       {!session ? (
         // کاربر لاگین نکرده
@@ -55,5 +62,6 @@ export default function RootLayout() {
         </>
       )}
     </Stack>
+    </View>
   );
 }
