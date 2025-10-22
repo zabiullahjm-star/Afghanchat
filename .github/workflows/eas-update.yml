@@ -2,12 +2,12 @@ name: Expo OTA Update
 
 on:
   push:
-    branches: [ preview, main ]
+    branches: [preview, develop]
 
 jobs:
   update:
     runs-on: ubuntu-latest
-
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,11 +27,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Create CI polyfills
+        run: |
+          mkdir -p scripts
+          cat > scripts/ci-polyfills.js << 'EOF'
+          if (typeof window === 'undefined') {
+            global.window = {};
+            global.document = {};
+            global.navigator = {};
+            global.localStorage = {
+              getItem: () => null,
+              setItem: () => {},
+              removeItem: () => {},
+            };
+          }
+          EOF
+
       - name: Publish OTA Update
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          CI: 1
+          CI: "true"
+          NODE_OPTIONS: "--require ./scripts/ci-polyfills.js"
         run: |
           BRANCH_NAME=${GITHUB_REF#refs/heads/}
-          COMMIT_MSG=${{ github.event.head_commit.message }}
-          eas update --branch $BRANCH_NAME --message "OTA Update: ${COMMIT_MSG}"
+          eas update --branch $BRANCH_NAME --message "آپدیت: ${{ github.event.head_commit.message || 'Auto-update' }}"
