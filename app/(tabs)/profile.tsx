@@ -42,7 +42,7 @@ export default function ProfileScreen() {
             }
 
         } catch (error) {
-            console.error('خطا در دریافت اطلاعات کاربر:', error);
+            console.error('.خطا در دریافت اطلاعات کاربر:', error);
         } finally {
             setLoading(false);
         }
