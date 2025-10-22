@@ -2,7 +2,7 @@ name: Expo OTA Update
 
 on:
   push:
-    branches: [ preview, main ] # می‌توانید branchهای مورد نظر را اضافه کنید
+    branches: [ preview, main ]
 
 jobs:
   update:
@@ -15,7 +15,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20 # استفاده از نسخه LTS
+          node-version: 20
           cache: 'npm'
 
       - name: Setup Expo and EAS
@@ -25,10 +25,13 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Install dependencies
-        run: npm ci # استفاده از npm ci برای نصب سریع‌تر و قابل اطمینان‌تر
+        run: npm ci
 
       - name: Publish OTA Update
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          CI: 1
         run: |
-          eas update --branch ${{ github.ref_name }} --message "OTA Update: ${{ github.event.head_commit.message || 'Automated update' }}"
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          COMMIT_MSG=${{ github.event.head_commit.message }}
+          eas update --branch $BRANCH_NAME --message "OTA Update: ${COMMIT_MSG}"
