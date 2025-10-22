@@ -11,251 +11,175 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
+import { User } from '@supabase/supabase-js';
 
-interface Person {
+interface Profile {
     id: string;
-    name: string;
     username: string;
-    avatar_url: string | null;
-    is_online: boolean;
-    last_seen: string;
-    phone?: string;
-    englishName?: string;
+    full_name: string;
+    phone: string;
+    avatar_url: string;
+    created_at: string;
 }
 
 export default function ContactsScreen() {
     const router = useRouter();
-    const [persons, setPersons] = useState<Person[]>([]);
+    const [profiles, setProfiles] = useState<Profile[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
+    const [searching, setSearching] = useState(false);
+    const [currentUser, setCurrentUser] = useState<User | null>(null);
 
     useEffect(() => {
-        fetchPersons();
+        getCurrentUser();
     }, []);
 
-    const fetchPersons = async () => {
+    const getCurrentUser = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        setCurrentUser(user);
+    };
+
+    const searchUsers = async () => {
+        if (!searchQuery.trim()) {
+            setProfiles([]);
+            return;
+        }
+
         try {
-            setLoading(true);
+            setSearching(true);
 
-            // فعلاً از داده‌های تستی استفاده می‌کنیم
-            const testData: Person[] = [
-                {
-                    id: 'user2',
-                    name: 'نصرت تریدر',
-                    username: 'sara_mohammadi',
-                    avatar_url: null,
-                    is_online: true,
-                    last_seen: new Date().toISOString()
-                },
-                {
-                    id: 'user3',
-                    name: 'هجرت',
-                    username: 'reza_karimi',
-                    avatar_url: null,
-                    is_online: false,
-                    last_seen: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() // 2 ساعت پیش
-                },
-                {
-                    id: 'user4',
-                    name: 'ستاره',
-                    username: 'nazanin_ahmadi',
-                    avatar_url: null,
-                    is_online: true,
-                    last_seen: new Date().toISOString()
-                },
-                {
-                    id: 'user5',
-                    name: 'علی رضا',
-                    username: 'amir_hosseini',
-                    avatar_url: null,
-                    is_online: true,
-                    last_seen: new Date().toISOString()
-                }
-            ];
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .or(`full_name.ilike.% ${searchQuery} %, username.ilike.% ${searchQuery} %, phone.ilike.% ${searchQuery} %`)
+                .neq('id', currentUser?.id)
+                .limit(20);
 
-            setPersons(testData);
+            if (error) {
+                console.error('خطا در جستجو:', error);
+                Alert.alert('خطا', 'مشکلی در جستجو پیش آمد');
+                return;
+            }
+
+            setProfiles(data || []);
 
         } catch (error) {
             console.error('خطا:', error);
+            Alert.alert('خطا', 'مشکلی در جستجو پیش آمد');
         } finally {
-            setLoading(false);
+            setSearching(false);
         }
     };
 
-    const filteredPersons = persons.filter(person => {
-        const query = searchQuery.toLowerCase().trim();
+    const startChat = async (profile: Profile) => {
+        if (!currentUser) return;
 
-        if (!query) return false;
-
-        // جستجو در نام کامل (با حذف فاصله‌ها)
-        const cleanName = person.name.replace(/\s+/g, '').toLowerCase();
-        const cleanQuery = query.replace(/\s+/g, '');
-
-        // جستجو در نام کاربری (حذف @ اگر وجود دارد)
-        const cleanUsername = person.username.replace('@', '').toLowerCase();
-
-        // جستجو در شماره تلفن (حذف کاراکترهای غیرعددی)
-        const cleanPhone = person.phone?.replace(/[^\d]/g, '') || '';
-        const cleanPhoneQuery = query.replace(/[^\d]/g, '');
-
-        return (
-            // جستجوی مستقیم در نام
-            person.name.toLowerCase().includes(query) ||
-            cleanName.includes(cleanQuery) ||
-
-            // جستجو در نام کاربری
-            person.username.toLowerCase().includes(query) ||
-            cleanUsername.includes(cleanQuery) ||
-
-            // جستجو در شماره تلفن
-            (person.phone && (
-                person.phone.includes(query) ||
-                cleanPhone.includes(cleanPhoneQuery) ||
-                // جستجو با فرمت‌های مختلف شماره
-                person.phone.replace(/\s+/g, '').includes(cleanPhoneQuery) ||
-                person.phone.replace(/[^\d]/g, '').includes(cleanPhoneQuery) ||
-                // جستجوی معکوس (اگر کاربر 0 اول رو نزده)
-                (cleanPhoneQuery.startsWith('9') && cleanPhone.endsWith(cleanPhoneQuery))
-            )) ||
-
-            // جستجوی فازی در نام (برای غلط‌های املایی)
-            (query.length > 2 && (
-                person.name.toLowerCase().includes(query.substring(0, query.length - 1)) ||
-                person.name.toLowerCase().includes(query.substring(1)) ||
-                // جستجو در کلمات جداگانه نام
-                person.name.toLowerCase().split(' ').some(word =>
-                    word.includes(query) || query.includes(word)
-                )
-            )) ||
-
-            // جستجو در حروف اول نام
-            (query.length > 1 &&
-                person.name.split(' ')
-                    .map(word => word.charAt(0))
-                    .join('')
-                    .toLowerCase()
-                    .includes(query)
-            ) ||
-
-            // جستجو در نام به انگلیسی (اگر کاربر فارسی تایپ کرده)
-            (person.englishName &&
-                person.englishName.toLowerCase().includes(query)
-            )
-        );
-    });
-
-    const startChat = async (person: Person) => {
         try {
-            // ساخت یک roomId منحصر به فرد
-            const roomId = `room_${['user1', person.id].sort().join('_')
+            const roomId = `room_${[currentUser.id, profile.id].sort().join('_')
                 }`;
 
-            // بررسی آیا اتاق چت از قبل وجود داره
             const { data: existingMessages } = await supabase
                 .from('messages')
                 .select('id')
                 .eq('chat_room_id', roomId)
                 .limit(1);
 
-            // اگر اتاق وجود نداره، یک پیام خوش‌آمدگویی ایجاد کن
             if (!existingMessages || existingMessages.length === 0) {
                 await supabase.from('messages').insert([
                     {
                         chat_room_id: roomId,
                         sender_id: 'system',
-                        content: ` چت با ${person.name} شروع شد`,
+                        content: ` چت با ${profile.full_name} شروع شد`,
                         message_type: 'system'
                     }
                 ]);
             }
 
-            // برو به صفحه چت
             router.push({
                 pathname: "/chat/[roomId]",
                 params: {
                     roomId,
-                    otherUserName: person.name
+                    otherUserName: profile.full_name
                 }
             } as any);
 
         } catch (error) {
-            Alert.alert('خطا', '.مشکلی در شروع چت پیش آمد');
+            Alert.alert('خطا', 'مشکلی در شروع چت پیش آمد');
         }
     };
 
-    const getStatusText = (person: Person) => {
-        if (person.is_online) return 'آنلاین';
-
-        const lastSeen = new Date(person.last_seen);
-        const now = new Date();
-        const diffHours = (now.getTime() - lastSeen.getTime()) / (1000 * 60 * 60);
-
-        if (diffHours < 1) return `${Math.floor(diffHours * 60)} دقیقه پیش`;
-        if (diffHours < 24) return `${Math.floor(diffHours)} ساعت پیش`;
-        return `${Math.floor(diffHours / 24)} روز پیش`;
+    const handleSearchSubmit = () => {
+        searchUsers();
     };
-
-    if (loading) {
-        return (
-            <View style={styles.center}>
-                <ActivityIndicator size="large" color="#007AFF" />
-                <Text>در حال بارگذاری مخاطبین...</Text>
-            </View>
-        );
-    }
 
     return (
         <View style={styles.container}>
             <View style={styles.header}>
-                <Text style={styles.title}>👥 مخاطبین</Text>
-                <Text style={styles.subtitle}>{persons.length} مخاطب</Text>
-            </View>{/* نوار جستجو */}
+                <Text style={styles.title}>🔍 جستجوی کاربران</Text>
+                <Text style={styles.subtitle}>همه کاربران AfghanChat</Text>
+            </View>
+
             <View style={styles.searchContainer}>
                 <TextInput
                     style={styles.searchInput}
-                    placeholder="جستجو در مخاطبین..."
+                    placeholder="جستجو براساس نام، نام کاربری یا شماره تلفن..."
                     value={searchQuery}
                     onChangeText={setSearchQuery}
+                    onSubmitEditing={handleSearchSubmit} returnKeyType="search"
                 />
+                <TouchableOpacity
+                    style={styles.searchButton}
+                    onPress={handleSearchSubmit}
+                    disabled={searching}
+                >
+                    {searching ? (
+                        <ActivityIndicator size="small" color="white" />
+                    ) : (
+                        <Text style={styles.searchButtonText}>جستجو</Text>
+                    )}
+                </TouchableOpacity>
             </View>
 
             <FlatList
-                data={filteredPersons}
+                data={profiles}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
                     <TouchableOpacity
                         style={styles.contactItem}
                         onPress={() => startChat(item)}
                     >
-                        <View style={styles.avatarContainer}>
-                            <View style={styles.avatar}>
-                                <Text style={styles.avatarText}>
-                                    {item.name.charAt(0)}
-                                </Text>
-                            </View>
-                            {item.is_online && <View style={styles.onlineIndicator} />}
+                        <View style={styles.avatar}>
+                            <Text style={styles.avatarText}>
+                                {item.full_name?.charAt(0) || 'U'}
+                            </Text>
                         </View>
 
                         <View style={styles.contactInfo}>
-                            <Text style={styles.contactName}>{item.name}</Text>
-                            <Text style={styles.contactUsername}>@{item.username}</Text>
+                            <Text style={styles.contactName}>
+                                {item.full_name || 'کاربر بدون نام'}
+                            </Text>
+                            <Text style={styles.contactUsername}>
+                                @{item.username}
+                            </Text>
+                            {item.phone && (
+                                <Text style={styles.contactPhone}>
+                                    📞 {item.phone}
+                                </Text>
+                            )}
                         </View>
 
-                        <View style={styles.statusContainer}>
-                            <Text style={[
-                                styles.statusText,
-                                item.is_online ? styles.onlineText : styles.offlineText
-                            ]}>
-                                {getStatusText(item)}
-                            </Text>
-                            <Text style={styles.startChatText}>شروع چت</Text>
-                        </View>
+                        <Text style={styles.startChatText}>
+                            شروع چت
+                        </Text>
                     </TouchableOpacity>
                 )}
                 ListEmptyComponent={
                     <View style={styles.emptyContainer}>
                         <Text style={styles.emptyText}>
-                            {searchQuery ? 'مخاطبی یافت نشد' : 'هنوز مخاطبی ندارید'}
+                            {searchQuery ?
+                                'کاربری با این مشخصات یافت نشد'
+                                : 'برای جستجو، نام یا شماره کاربر را وارد کنید'
+                            }
                         </Text>
                     </View>
                 }
@@ -268,11 +192,6 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#fff'
-    },
-    center: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center'
     },
     header: {
         padding: 16,
@@ -295,13 +214,30 @@ const styles = StyleSheet.create({
     },
     searchContainer: {
         padding: 16,
-        backgroundColor: '#fff'
+        backgroundColor: '#fff',
+        flexDirection: 'row',
+        alignItems: 'center'
     },
     searchInput: {
+        flex: 1,
         backgroundColor: '#f5f5f5',
         padding: 12,
         borderRadius: 8,
-        fontSize: 16
+        fontSize: 16,
+        marginRight: 8
+    },
+    searchButton: {
+        backgroundColor: '#007AFF',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderRadius: 8,
+        minWidth: 80,
+        alignItems: 'center'
+    },
+    searchButtonText: {
+        color: 'white',
+        fontSize: 14,
+        fontWeight: 'bold'
     },
     contactItem: {
         flexDirection: 'row',
@@ -310,33 +246,18 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: '#f0f0f0'
     },
-    avatarContainer: {
-        position: 'relative',
-        marginRight: 12
-    },
     avatar: {
         width: 50,
         height: 50,
-        borderRadius: 25,
-        backgroundColor: '#007AFF',
+        borderRadius: 25, backgroundColor: '#007AFF',
         justifyContent: 'center',
-        alignItems: 'center'
+        alignItems: 'center',
+        marginRight: 12
     },
     avatarText: {
         color: 'white',
         fontSize: 18,
         fontWeight: 'bold'
-    },
-    onlineIndicator: {
-        position: 'absolute',
-        bottom: 2,
-        right: 2,
-        width: 12,
-        height: 12,
-        borderRadius: 6,
-        backgroundColor: '#4CAF50',
-        borderWidth: 2,
-        borderColor: 'white'
     },
     contactInfo: {
         flex: 1
@@ -349,30 +270,23 @@ const styles = StyleSheet.create({
     },
     contactUsername: {
         fontSize: 14,
-        color: '#666'
+        color: '#666',
+        marginBottom: 2
     },
-    statusContainer: {
-        alignItems: 'flex-end'
-    },
-    statusText: {
+    contactPhone: {
         fontSize: 12,
-        marginBottom: 4
-    },
-    onlineText: {
         color: '#4CAF50'
-    },
-    offlineText: {
-        color: '#999'
     },
     startChatText: {
         fontSize: 12,
-        color: '#007AFF'
+        color: '#007AFF',
+        fontWeight: '500'
     },
     emptyContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        paddingVertical: 50
+        paddingVertical: 100
     },
     emptyText: {
         fontSize: 16,
