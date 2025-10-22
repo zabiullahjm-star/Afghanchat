@@ -110,7 +110,7 @@ export default function SignUpScreen() {
 
                 <View style={styles.form}>
                     <View style={styles.inputContainer}>
-                        <Text style={styles.inputLabel}>نام کامل</Text>
+                        <Text style={styles.inputLabel}>نام. کامل</Text>
                         <TextInput
                             style={styles.input}
                             placeholder="نام و نام خانوادگی"
