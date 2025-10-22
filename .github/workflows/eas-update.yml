@@ -1,0 +1,31 @@
+name: Expo OTA Update
+
+on:
+  push:
+    branches: [ preview ]
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 18
+
+    - name: Setup Expo and EAS
+      uses: expo/expo-github-action@v8
+      with:
+        eas-version: latest
+        token: ${{ secrets.EXPO_TOKEN }}
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Publish OTA Update
+      run: |
+        eas update --branch preview --message "آپدیت جدید: ${{ github.event.head_commit.message }}"
