@@ -7,25 +7,32 @@ on:
 jobs:
   update:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 18
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # بهتره از Node 20 استفاده بشه چون Supabase هشدار داده Node 18 دیگه پشتیبانی نمیشه
+          node-version: 20
 
-    - name: Setup Expo and EAS
-      uses: expo/expo-github-action@v8
-      with:
-        eas-version: latest
-        token: ${{ secrets.EXPO_TOKEN }}
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
 
-    - name: Install dependencies
-      run: npm install
+      - name: Install dependencies
+        run: npm install
 
-    - name: Publish OTA Update
-      run: |
-        eas update --branch preview --message "آپدیت جدید: ${{ github.event.head_commit.message }}"
+      - name: Publish OTA Update
+        env:
+          # تنظیمات محیطی برای رفع خطاهای CI و window
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          CI: "1"
+          NODE_OPTIONS: "--require ./scripts/ci-polyfills.js --max_old_space_size=4096"
+        run: |
+          # اجرای دستور آپدیت OTA با پیام آخرین commit
+          eas update --branch preview --message "آپدیت جدید: ${{ github.event.head_commit.message }}"
