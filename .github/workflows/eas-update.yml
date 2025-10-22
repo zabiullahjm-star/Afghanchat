@@ -2,12 +2,11 @@ name: Expo OTA Update
 
 on:
   push:
-    branches: [preview, main]
+    branches: [preview]
 
 jobs:
   update:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -18,7 +17,7 @@ jobs:
           node-version: 20
           cache: "npm"
 
-      - name: Setup Expo and EAS
+      - name: Setup Expo
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
@@ -27,59 +26,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Create comprehensive CI polyfills
-        run: |
-          mkdir -p scripts
-          cat > scripts/ci-polyfills.js << 'EOF'
-          if (typeof window === 'undefined') {
-            global.window = {
-              document: {
-                getElementsByTagName: () => [],
-                createElement: () => ({
-                  setAttribute: () => {},
-                  appendChild: () => {},
-                }),
-                head: {
-                  appendChild: () => {},
-                },
-              },
-              navigator: { userAgent: '' },
-              location: {
-                href: '',
-                protocol: 'https:',
-                host: '',
-                hostname: '',
-                port: '',
-                pathname: '',
-                search: '',
-                hash: '',
-                origin: 'https://localhost',
-              },
-            };
-            
-            global.document = global.window.document;
-            global.navigator = global.window.navigator;
-            global.location = global.window.location;
-            
-            global.localStorage = {
-              getItem: () => null,
-              setItem: () => {},
-              removeItem: () => {},
-              clear: () => {},
-              key: () => null,
-              length: 0,
-            };
-            
-            global.CSS = { supports: () => false };
-          }
-          EOF
-
       - name: Publish OTA Update
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          CI: "true"
-          EXPO_NO_TYPESCRIPT_SETUP: "1"
-          NODE_OPTIONS: "--require ./scripts/ci-polyfills.js --max_old_space_size=4096"
         run: |
-          BRANCH_NAME=${GITHUB_REF#refs/heads/}
-          eas update --branch $BRANCH_NAME --message "آپدیت: ${{ github.event.head_commit.message || 'Auto-update' }}"
+          eas update --branch preview --message "آپدیت جدید"
