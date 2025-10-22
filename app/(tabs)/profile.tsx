@@ -55,7 +55,7 @@ export default function ProfileScreen() {
             [
                 { text: 'لغو', style: 'cancel' },
                 {
-                    text: 'خروج',
+                    text: '.خروج',
                     style: 'destructive',
                     onPress: async () => {
                         await supabase.auth.signOut();
