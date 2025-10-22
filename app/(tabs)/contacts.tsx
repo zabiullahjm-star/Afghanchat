@@ -238,7 +238,7 @@ export default function ContactsScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#fff'
+        backgroundColor: '#331f1fff'
     },
     header: {
         padding: 20,
