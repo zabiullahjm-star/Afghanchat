@@ -15,10 +15,10 @@ import { User } from '@supabase/supabase-js';
 
 interface Profile {
     id: string;
-    username: string;
-    full_name: string;
-    phone: string;
-    avatar_url: string;
+    username: string | null;
+    full_name: string | null;
+    phone: string | null;
+    avatar_url: string | null;
     created_at: string;
 }
 
@@ -26,9 +26,9 @@ export default function ContactsScreen() {
     const router = useRouter();
     const [profiles, setProfiles] = useState<Profile[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
-    const [loading, setLoading] = useState(false);
     const [searching, setSearching] = useState(false);
     const [currentUser, setCurrentUser] = useState<User | null>(null);
+    const [searchFocused, setSearchFocused] = useState(false);
 
     useEffect(() => {
         getCurrentUser();
@@ -48,12 +48,15 @@ export default function ContactsScreen() {
         try {
             setSearching(true);
 
+            const query = searchQuery.trim().toLowerCase();
+
             const { data, error } = await supabase
                 .from('profiles')
                 .select('*')
-                .or(`full_name.ilike.% ${searchQuery} %, username.ilike.% ${searchQuery} %, phone.ilike.% ${searchQuery} %`)
+                .or(`full_name.ilike.% ${query} %, username.ilike.% ${query} %, phone.ilike.% ${query} %`)
                 .neq('id', currentUser?.id)
-                .limit(20);
+                .order('full_name', { ascending: true })
+                .limit(50);
 
             if (error) {
                 console.error('خطا در جستجو:', error);
@@ -78,32 +81,41 @@ export default function ContactsScreen() {
             const roomId = `room_${[currentUser.id, profile.id].sort().join('_')
                 }`;
 
-            const { data: existingMessages } = await supabase
+            const { data: existingMessages, error: checkError } = await supabase
                 .from('messages')
                 .select('id')
                 .eq('chat_room_id', roomId)
                 .limit(1);
 
+            if (checkError) {
+                console.error('خطا در بررسی چت:', checkError);
+            }
+
             if (!existingMessages || existingMessages.length === 0) {
-                await supabase.from('messages').insert([
+                const { error: insertError } = await supabase.from('messages').insert([
                     {
                         chat_room_id: roomId,
                         sender_id: 'system',
-                        content: ` چت با ${profile.full_name} شروع شد`,
+                        content: ` چت با ${profile.full_name || 'کاربر'} شروع شد`,
                         message_type: 'system'
                     }
                 ]);
+
+                if (insertError) {
+                    console.error('خطا در ایجاد چت:', insertError);
+                }
             }
 
             router.push({
                 pathname: "/chat/[roomId]",
                 params: {
                     roomId,
-                    otherUserName: profile.full_name
+                    otherUserName: profile.full_name || 'کاربر'
                 }
             } as any);
 
         } catch (error) {
+            console.error('خطا در شروع چت:', error);
             Alert.alert('خطا', 'مشکلی در شروع چت پیش آمد');
         }
     };
@@ -112,7 +124,15 @@ export default function ContactsScreen() {
         searchUsers();
     };
 
-    return (
+    const clearSearch = () => {
+        setSearchQuery('');
+        setProfiles([]);
+    };
+
+    const getInitials = (name: string | null) => {
+        if (!name) return 'U';
+        return name.split(' ').map(word => word.charAt(0)).join('').toUpperCase().substring(0, 2);
+    }; return (
         <View style={styles.container}>
             <View style={styles.header}>
                 <Text style={styles.title}>🔍 جستجوی کاربران</Text>
@@ -120,15 +140,28 @@ export default function ContactsScreen() {
             </View>
 
             <View style={styles.searchContainer}>
-                <TextInput
-                    style={styles.searchInput}
-                    placeholder="جستجو براساس نام، نام کاربری یا شماره تلفن..."
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                    onSubmitEditing={handleSearchSubmit} returnKeyType="search"
-                />
+                <View style={[styles.searchInputContainer, searchFocused && styles.searchInputFocused]}>
+                    <TextInput
+                        style={styles.searchInput}
+                        placeholder="جستجو با نام، نام کاربری یا شماره..."
+                        placeholderTextColor="#999"
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        onSubmitEditing={handleSearchSubmit}
+                        onFocus={() => setSearchFocused(true)}
+                        onBlur={() => setSearchFocused(false)}
+                        returnKeyType="search"
+                        autoCorrect={false}
+                        autoCapitalize="none"
+                    />
+                    {searchQuery.length > 0 && (
+                        <TouchableOpacity onPress={clearSearch} style={styles.clearButton}>
+                            <Text style={styles.clearText}>✕</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
                 <TouchableOpacity
-                    style={styles.searchButton}
+                    style={[styles.searchButton, searching && styles.searchButtonDisabled]}
                     onPress={handleSearchSubmit}
                     disabled={searching}
                 >
@@ -140,6 +173,13 @@ export default function ContactsScreen() {
                 </TouchableOpacity>
             </View>
 
+            {searching && (
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="small" color="#007AFF" />
+                    <Text style={styles.loadingText}>در حال جستجو...</Text>
+                </View>
+            )}
+
             <FlatList
                 data={profiles}
                 keyExtractor={(item) => item.id}
@@ -150,7 +190,7 @@ export default function ContactsScreen() {
                     >
                         <View style={styles.avatar}>
                             <Text style={styles.avatarText}>
-                                {item.full_name?.charAt(0) || 'U'}
+                                {getInitials(item.full_name)}
                             </Text>
                         </View>
 
@@ -159,7 +199,7 @@ export default function ContactsScreen() {
                                 {item.full_name || 'کاربر بدون نام'}
                             </Text>
                             <Text style={styles.contactUsername}>
-                                @{item.username}
+                                @{item.username || 'بدون نام کاربری'}
                             </Text>
                             {item.phone && (
                                 <Text style={styles.contactPhone}>
@@ -168,33 +208,40 @@ export default function ContactsScreen() {
                             )}
                         </View>
 
-                        <Text style={styles.startChatText}>
-                            شروع چت
-                        </Text>
+                        <View style={styles.chatButton}>
+                            <Text style={styles.chatButtonText}>
+                                چت
+                            </Text>
+                        </View>
                     </TouchableOpacity>
                 )}
                 ListEmptyComponent={
                     <View style={styles.emptyContainer}>
                         <Text style={styles.emptyText}>
-                            {searchQuery ?
+                            {searchQuery && !searching ?
                                 'کاربری با این مشخصات یافت نشد'
-                                : 'برای جستجو، نام یا شماره کاربر را وارد کنید'
+                                : 'برای شروع جستجو، نام یا نام کاربری را وارد کنید'
                             }
                         </Text>
+                        {!searchQuery && (
+                            <Text style={styles.emptySubText}>
+                                می‌توانید با نام، نام کاربری یا شماره تلفن جستجو کنید
+                            </Text>
+                        )}
                     </View>
                 }
+                showsVerticalScrollIndicator={false}
             />
         </View>
     );
 }
-
 const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#fff'
     },
     header: {
-        padding: 16,
+        padding: 20,
         paddingTop: 60,
         backgroundColor: '#f8f9fa',
         borderBottomWidth: 1,
@@ -204,52 +251,93 @@ const styles = StyleSheet.create({
         fontSize: 24,
         fontWeight: 'bold',
         textAlign: 'center',
-        color: '#1a1a1a'
+        color: '#1a1a1a',
+        marginBottom: 4
     },
     subtitle: {
         fontSize: 14,
         textAlign: 'center',
-        color: '#666',
-        marginTop: 4
+        color: '#666'
     },
     searchContainer: {
         padding: 16,
         backgroundColor: '#fff',
         flexDirection: 'row',
-        alignItems: 'center'
+        alignItems: 'center',
+        gap: 12
+    },
+    searchInputContainer: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#f8f9fa',
+        borderRadius: 12,
+        borderWidth: 2,
+        borderColor: '#f8f9fa',
+        paddingHorizontal: 12
+    },
+    searchInputFocused: {
+        borderColor: '#007AFF',
+        backgroundColor: '#fff'
     },
     searchInput: {
         flex: 1,
-        backgroundColor: '#f5f5f5',
-        padding: 12,
-        borderRadius: 8,
+        paddingVertical: 12,
         fontSize: 16,
-        marginRight: 8
+        color: '#1a1a1a'
+    },
+    clearButton: {
+        padding: 4
+    },
+    clearText: {
+        fontSize: 16,
+        color: '#999',
+        fontWeight: 'bold'
     },
     searchButton: {
         backgroundColor: '#007AFF',
-        paddingHorizontal: 16,
+        paddingHorizontal: 20,
         paddingVertical: 12,
-        borderRadius: 8,
+        borderRadius: 12,
         minWidth: 80,
-        alignItems: 'center'
+        alignItems: 'center',
+        justifyContent: 'center'
+    },
+    searchButtonDisabled: {
+        opacity: 0.6
     },
     searchButtonText: {
         color: 'white',
-        fontSize: 14,
+        fontSize: 16,
         fontWeight: 'bold'
+    },
+    loadingContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+        gap: 8
+    },
+    loadingText: {
+        fontSize: 14,
+        color: '#666'
     },
     contactItem: {
         flexDirection: 'row',
         alignItems: 'center',
         padding: 16,
         borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0'
+        borderBottomColor: '#f0f0f0',
+        backgroundColor: '#fff',
+        marginHorizontal: 16,
+        borderRadius: 12,
+        marginVertical: 4
     },
     avatar: {
-        width: 50,
-        height: 50,
-        borderRadius: 25, backgroundColor: '#007AFF',
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: '#007AFF',
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 12
@@ -274,23 +362,39 @@ const styles = StyleSheet.create({
         marginBottom: 2
     },
     contactPhone: {
-        fontSize: 12,
+        fontSize: 13,
         color: '#4CAF50'
     },
-    startChatText: {
-        fontSize: 12,
+    chatButton: {
+        backgroundColor: '#f0f7ff',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#007AFF'
+    },
+    chatButtonText: {
         color: '#007AFF',
-        fontWeight: '500'
+        fontSize: 14, fontWeight: 'bold'
     },
     emptyContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        paddingVertical: 100
+        paddingVertical: 100,
+        paddingHorizontal: 40
     },
     emptyText: {
         fontSize: 16,
         color: '#666',
-        textAlign: 'center'
+        textAlign: 'center',
+        marginBottom: 8,
+        lineHeight: 24
+    },
+    emptySubText: {
+        fontSize: 14,
+        color: '#999',
+        textAlign: 'center',
+        lineHeight: 20
     }
 });
