@@ -113,7 +113,7 @@ export default function SignUpScreen() {
                         <Text style={styles.inputLabel}>نام کامل</Text>
                         <TextInput
                             style={styles.input}
-                            placeholder="نام و نام خانوادگی"
+                            placeholder="نام. و. نام خانوادگی"
                             value={formData.fullName}
                             onChangeText={(text) => updateFormData('fullName', text)}
                             autoCapitalize="words"
@@ -149,7 +149,7 @@ export default function SignUpScreen() {
                         <Text style={styles.inputLabel}>تکرار رمز عبور</Text>
                         <TextInput
                             style={styles.input}
-                            placeholder="رمز عبور را مجدداً وارد کنید"
+                            placeholder=".رمز عبور را مجدداً وارد کنید"
                             value={formData.confirmPassword}
                             onChangeText={(text) => updateFormData('confirmPassword', text)}
                             secureTextEntry
