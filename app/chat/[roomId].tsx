@@ -8,10 +8,12 @@ import {
     StyleSheet,
     KeyboardAvoidingView,
     Platform,
-    ActivityIndicator
+    ActivityIndicator,
+    Alert
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
+import { User } from '@supabase/supabase-js';
 
 interface Message {
     id: string;
@@ -22,17 +24,26 @@ interface Message {
 }
 
 export default function ChatScreen() {
-    const { roomId } = useLocalSearchParams();
+    const { roomId, otherUserName } = useLocalSearchParams();
+    const router = useRouter();
     const [messages, setMessages] = useState<Message[]>([]);
     const [newMessage, setNewMessage] = useState('');
     const [loading, setLoading] = useState(false);
     const [fetching, setFetching] = useState(true);
+    const [currentUser, setCurrentUser] = useState<User | null>(null);
     const flatListRef = useRef<FlatList>(null);
 
     useEffect(() => {
+        getCurrentUser();
         fetchMessages();
         subscribeToMessages();
     }, [roomId]);
+
+    // دریافت کاربر فعلی
+    const getCurrentUser = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        setCurrentUser(user);
+    };
 
     // دریافت پیام‌ها از دیتابیس
     const fetchMessages = async () => {
@@ -73,8 +84,11 @@ export default function ChatScreen() {
                     filter: `chat_room_id = eq.${roomId}`
                 },
                 (payload) => {
-                    console.log('پیام جدید از دیتابیس:', payload);
                     setMessages(prev => [...prev, payload.new as Message]);
+                    // اسکرول به پایین وقتی پیام جدید میاد
+                    setTimeout(() => {
+                        flatListRef.current?.scrollToEnd({ animated: true });
+                    }, 100);
                 }
             )
             .subscribe();
@@ -86,11 +100,11 @@ export default function ChatScreen() {
 
     // ارسال پیام جدید به دیتابیس
     const sendMessage = async () => {
-        if (!newMessage.trim()) return;
+        if (!newMessage.trim() || !currentUser) return;
 
         const messageToSend = {
             content: newMessage.trim(),
-            sender_id: 'user1', // فعلاً تستی
+            sender_id: currentUser.id,
             chat_room_id: roomId,
             message_type: 'text',
             read: false
@@ -104,7 +118,7 @@ export default function ChatScreen() {
                 id: `temp - ${Date.now()
                     }`,
                 content: newMessage.trim(),
-                sender_id: 'user1',
+                sender_id: currentUser.id,
                 created_at: new Date().toISOString(),
                 read: false
             };
@@ -112,19 +126,21 @@ export default function ChatScreen() {
             setMessages(prev => [...prev, tempMessage]);
             setNewMessage('');
 
+            // اسکرول به پایین
+            setTimeout(() => {
+                flatListRef.current?.scrollToEnd({ animated: true });
+            }, 100);
+
             // ارسال به دیتابیس
             const { data, error } = await supabase
                 .from('messages')
                 .insert([messageToSend])
-                .select();
-
-            if (error) {
-                console.error('خطا در ارسال پیام:', error);
-                // حذف پیام موقت در صورت خطا
-                setMessages(prev => prev.filter(msg => msg.id !== tempMessage.id));
-                alert('خطا در ارسال پیام: ' + error.message);
-            } else {
-                console.log('پیام با موفقیت ارسال شد:', data);
+                .select(); if (error) {
+                    console.error('خطا در ارسال پیام:', error);
+                    // حذف پیام موقت در صورت خطا
+                    setMessages(prev => prev.filter(msg => msg.id !== tempMessage.id));
+                    Alert.alert('خطا', 'خطا در ارسال پیام');
+                } else {
                 // جایگزینی پیام موقت با پیام واقعی از دیتابیس
                 if (data && data[0]) {
                     setMessages(prev =>
@@ -137,7 +153,7 @@ export default function ChatScreen() {
 
         } catch (error) {
             console.error('خطا:', error);
-            alert('خطا در ارسال پیام');
+            Alert.alert('خطا', 'خطا در ارسال پیام');
         } finally {
             setLoading(false);
         }
@@ -145,27 +161,36 @@ export default function ChatScreen() {
 
     // کامپوننت برای نمایش هر پیام
     const renderMessage = ({ item }: { item: Message }) => {
-        const isMyMessage = item.sender_id === 'user1';
+        const isMyMessage = item.sender_id === currentUser?.id;
         const isTempMessage = item.id.startsWith('temp-');
 
         return (
             <View style={[
-                styles.messageContainer, isMyMessage ? styles.myMessage : styles.otherMessage,
-                isTempMessage && styles.tempMessage
+                styles.messageContainer,
+                isMyMessage ? styles.myMessageContainer : styles.otherMessageContainer
             ]}>
-                <Text style={[
-                    styles.messageText,
-                    isMyMessage ? styles.myMessageText : styles.otherMessageText
+                <View style={[
+                    styles.messageBubble,
+                    isMyMessage ? styles.myMessageBubble : styles.otherMessageBubble,
+                    isTempMessage && styles.tempMessage
                 ]}>
-                    {item.content}
-                    {isTempMessage && ' ...'}
-                </Text>
-                <Text style={styles.messageTime}>
-                    {new Date(item.created_at).toLocaleTimeString('fa-IR', {
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    })}
-                </Text>
+                    <Text style={[
+                        styles.messageText,
+                        isMyMessage ? styles.myMessageText : styles.otherMessageText
+                    ]}>
+                        {item.content}
+                        {isTempMessage && ' ...'}
+                    </Text>
+                    <Text style={[
+                        styles.messageTime,
+                        isMyMessage ? styles.myMessageTime : styles.otherMessageTime
+                    ]}>
+                        {new Date(item.created_at).toLocaleTimeString('fa-IR', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        })}
+                    </Text>
+                </View>
             </View>
         );
     };
@@ -183,11 +208,20 @@ export default function ChatScreen() {
         <KeyboardAvoidingView
             style={styles.container}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
-            {/* هدر چت */}
+            {/* هدر چت - زیباتر و کوچک‌تر */}
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>💬 چت</Text>
-                <Text style={styles.roomId}>اتاق: {roomId}</Text>
+                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+                    <Text style={styles.backButtonText}>←</Text>
+                </TouchableOpacity>
+                <View style={styles.headerInfo}>
+                    <Text style={styles.headerTitle}>{otherUserName || 'چت'}</Text>
+                    <Text style={styles.headerSubtitle}>
+                        {messages.length > 0 ? `${messages.length} پیام` : 'شروع گفتگو'}
+                    </Text>
+                </View>
+                <View style={styles.headerPlaceholder} />
             </View>
 
             {/* لیست پیام‌ها */}
@@ -198,13 +232,14 @@ export default function ChatScreen() {
                 renderItem={renderMessage}
                 style={styles.messagesList}
                 contentContainerStyle={styles.messagesContent}
-                onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
+                onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })} onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
                 ListEmptyComponent={
                     <View style={styles.emptyContainer}>
-                        <Text style={styles.emptyText}>هنوز هیچ پیامی ارسال نشده</Text>
-                        <Text style={styles.emptySubText}>اولین پیام رو تو این چت بفرست!</Text>
+                        <Text style={styles.emptyText}>🎉 گفتگو رو شروع کن!</Text>
+                        <Text style={styles.emptySubText}>اولین پیام رو ارسال کن</Text>
                     </View>
                 }
+                showsVerticalScrollIndicator={false}
             />
 
             {/* اینپوت ارسال پیام */}
@@ -216,7 +251,7 @@ export default function ChatScreen() {
                     placeholder="پیام خود را بنویسید..."
                     placeholderTextColor="#999"
                     multiline
-                    onSubmitEditing={sendMessage}
+                    maxLength={500}
                 />
                 <TouchableOpacity
                     style={[
@@ -226,9 +261,11 @@ export default function ChatScreen() {
                     onPress={sendMessage}
                     disabled={!newMessage.trim() || loading}
                 >
-                    <Text style={styles.sendButtonText}>
-                        {loading ? '...' : '➤'}
-                    </Text>
+                    {loading ? (
+                        <ActivityIndicator size="small" color="white" />
+                    ) : (
+                        <Text style={styles.sendButtonText}>➤</Text>
+                    )}
                 </TouchableOpacity>
             </View>
         </KeyboardAvoidingView>
@@ -238,17 +275,40 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#f5f5f5'
+        backgroundColor: '#f8f9fa'
     },
     center: {
         flex: 1,
         justifyContent: 'center',
-        alignItems: 'center'
+        alignItems: 'center',
+        backgroundColor: '#f8f9fa'
     },
     header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         backgroundColor: '#007AFF',
-        padding: 16,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
         paddingTop: 60,
+        borderBottomLeftRadius: 20,
+        borderBottomRightRadius: 20,
+        elevation: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8
+    },
+    backButton: {
+        padding: 8
+    },
+    backButtonText: {
+        color: 'white',
+        fontSize: 20,
+        fontWeight: 'bold'
+    },
+    headerInfo: {
+        flex: 1,
         alignItems: 'center'
     },
     headerTitle: {
@@ -256,93 +316,135 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: 'bold'
     },
-    roomId: {
-        color: 'white',
+    headerSubtitle: {
+        color: 'rgba(255,255,255,0.8)',
         fontSize: 12,
-        marginTop: 4
+        marginTop: 2
+    },
+    headerPlaceholder: {
+        width: 40
     },
     messagesList: {
         flex: 1
     },
     messagesContent: {
-        padding: 16
+        paddingHorizontal: 16,
+        paddingVertical: 8
     },
     messageContainer: {
+        flexDirection: 'row',
+        marginVertical: 4
+    },
+    myMessageContainer: {
+        justifyContent: 'flex-end'
+    },
+    otherMessageContainer: {
+        justifyContent: 'flex-start'
+    },
+    messageBubble: {
         maxWidth: '80%',
-        marginVertical: 4,
-        padding: 12,
-        borderRadius: 16
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderRadius: 20,
+        marginVertical: 2
     },
-    myMessage: {
-        alignSelf: 'flex-end',
-        backgroundColor: '#007AFF'
+    myMessageBubble: {
+        backgroundColor: '#007AFF',
+        borderBottomRightRadius: 6
     },
-    otherMessage: {
-        alignSelf: 'flex-start',
-        backgroundColor: 'white'
+    otherMessageBubble: {
+        backgroundColor: 'white',
+        borderBottomLeftRadius: 6,
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4
     },
     tempMessage: {
         opacity: 0.7
     },
     messageText: {
-        fontSize: 16
+        fontSize: 16,
+        lineHeight: 22
     },
     myMessageText: {
         color: 'white'
-    },
-    otherMessageText: {
-        color: 'black'
+    }, otherMessageText: {
+        color: '#1a1a1a'
     },
     messageTime: {
         fontSize: 10,
         marginTop: 4,
         opacity: 0.7
     },
+    myMessageTime: {
+        color: 'rgba(255,255,255,0.7)',
+        textAlign: 'right'
+    },
+    otherMessageTime: {
+        color: 'rgba(0,0,0,0.5)',
+        textAlign: 'left'
+    },
     inputContainer: {
         flexDirection: 'row',
+        alignItems: 'flex-end',
         padding: 16,
         backgroundColor: 'white',
-        alignItems: 'flex-end'
+        borderTopWidth: 1,
+        borderTopColor: '#e9ecef',
+        paddingBottom: Platform.OS === 'ios' ? 25 : 16
     },
     textInput: {
         flex: 1,
         borderWidth: 1,
-        borderColor: '#ddd',
-        borderRadius: 20,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        marginRight: 8,
-        maxHeight: 100
+        borderColor: '#e9ecef',
+        borderRadius: 25,
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        marginRight: 12,
+        maxHeight: 100,
+        backgroundColor: '#f8f9fa',
+        fontSize: 16,
+        textAlign: 'right'
     },
     sendButton: {
         backgroundColor: '#007AFF',
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
         justifyContent: 'center',
-        alignItems: 'center'
+        alignItems: 'center',
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2
     },
     sendButtonDisabled: {
         backgroundColor: '#ccc'
     },
     sendButtonText: {
         color: 'white',
-        fontSize: 16,
-        fontWeight: 'bold'
+        fontSize: 18,
+        fontWeight: 'bold',
+        marginLeft: 2
     },
     emptyContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        paddingVertical: 50
+        paddingVertical: 100
     },
     emptyText: {
-        fontSize: 18,
+        fontSize: 20,
         color: '#666',
-        marginBottom: 8
+        marginBottom: 8,
+        fontWeight: 'bold'
     },
     emptySubText: {
         fontSize: 14,
-        color: '#999'
+        color: '#999',
+        textAlign: 'center'
     }
 });
