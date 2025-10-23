@@ -53,12 +53,12 @@ export default function RootLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       {!session ? (
         // کاربر لاگین نکرده
-        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(auth)" options={{headerShown: false }} />
       ) : (
         // کاربر لاگین کرده
         <>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="chat/[roomId]" options={{ headerShown: true, title: 'چت' }} />
+          <Stack.Screen name="(tabs)" options={{headerShown: false}} />
+          <Stack.Screen name="chat/[roomId]" options={{ headerShown: false }} />
         </>
       )}
     </Stack>

@@ -15,42 +15,44 @@ export default function ChatListScreen() {
   const router = useRouter();
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
   useEffect(() => {
+    getCurrentUser();
     fetchChatRooms();
     subscribeToNewMessages();
   }, []);
+  const getCurrentUser = async () => {
+    const { data: {user} } = await supabase.auth.getUser();
+    setCurrentUser(user);
+  };
 
-  // دریافت لیست چت‌ها از دیتابیس
+
+  // به جاش این تابع جدید رو اضافه کن:
   const fetchChatRooms = async () => {
+    if (!currentUser) return;
+
     try {
       setLoading(true);
 
-      // دریافت آخرین پیام هر اتاق چت از دیتابیس
+      // فقط چت‌هایی رو بگیر که کاربر currentUser در اونها پیام داره
       const { data, error } = await supabase
         .from('messages')
-        .select('chat_room_id, content, created_at')
+        .select('*')
+        .or(`sender_id.eq.${ currentUser.id }, chat_room_id.ilike.% ${ currentUser.id } %`)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error('خطا در دریافت چت‌ها:', error);
-        // اگر خطا خورد، از داده‌های تستی استفاده کن
-        setChatRooms(getTestData());
-        return;
-      }
+      if (error) throw error;
 
-      if (data && data.length > 0) {
-        // تبدیل داده‌های دیتابیس به فرمت ChatRoom
-        const chatRoomsFromDb = processChatRoomsFromMessages(data);
-        setChatRooms(chatRoomsFromDb);
-      } else {
-        // اگر داده‌ای نبود، از داده‌های تستی استفاده کن
-        setChatRooms(getTestData());
+      if (data) {
+        // پردازش داده‌ها برای نمایش فقط چت‌های کاربر
+        const userChatRooms = processUserChatRooms(data, currentUser.id);
+        setChatRooms(userChatRooms);
       }
 
     } catch (error) {
-      console.error('خطا:', error);
-      setChatRooms(getTestData());
+      console.error('خطا در دریافت چت‌ها:', error);
+      setChatRooms([]);
     } finally {
       setLoading(false);
     }
@@ -90,118 +92,110 @@ export default function ChatListScreen() {
           created_at: message.created_at,
           last_message: message.content,
           last_message_at: message.created_at,
-          other_user_name:` کاربر ${ message.chat_room_id }`
+          other_user_name: ` کاربر ${message.chat_room_id}`
         });
+      }
+    });
+
+    return Array.from(roomMap.values());
+  };
+
+ 
+  // محاسبه زمان نسبی برای نمایش
+  const getRelativeTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
+
+    if (diffInHours < 1) {
+      return 'همین الان';
+    } else if (diffInHours < 24) {
+      return `${Math.floor(diffInHours)} ساعت پیش`;
+    } else {
+      return `${Math.floor(diffInHours / 24)} روز پیش`;
+    }
+  }; if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>در حال بارگذاری مکالمات...</Text>
+      </View>
+    );
+  }
+  // این تابع رو اضافه کن:
+  const processUserChatRooms = (messages: any[], userId: string): ChatRoom[] => {
+    const roomMap = new Map();
+
+    messages.forEach(message => {
+      if (!roomMap.has(message.chat_room_id)) {
+        // استخراج نام کاربر دیگر از roomId
+        const otherUserId = message.chat_room_id
+          .replace(`room_`, '')
+          .split('_')
+          .find((id:string) => id !== userId);
+
+        roomMap.set(message.chat_room_id, {
+          id: message.chat_room_id,
+          last_message: message.content,
+          last_message_at: message.created_at,
+          other_user_name: otherUserId ?` کاربر ${ otherUserId.substring(0, 8) } `: 'کاربر'
+      });
   }
 });
 
 return Array.from(roomMap.values());
-  };
+};
 
-// داده‌های تستی برای وقتی که دیتابیس خالیه
-const getTestData = (): ChatRoom[] => [
-  {
-    id: '1',
-    created_at: new Date().toISOString(),
-    last_message: 'سلام! چطوری؟',
-    last_message_at: new Date().toISOString(),
-    other_user_name: 'علی'
-  },
-  {
-    id: '2',
-    created_at: new Date().toISOString(),
-    last_message: 'فردا جلسه داریم',
-    last_message_at: new Date().toISOString(),
-    other_user_name: 'رضا'
-  },
-  {
-    id: '3',
-    created_at: new Date().toISOString(),
-    last_message: 'پروژه رو دیدم، عالی بود!',
-    last_message_at: new Date().toISOString(),
-    other_user_name: 'سارا'
-  },
-  {
-    id: '4',
-    created_at: new Date().toISOString(),
-    last_message: 'کی میای دفتر؟',
-    last_message_at: new Date().toISOString(),
-    other_user_name: 'محمد'
-  }
-];
-
-// محاسبه زمان نسبی برای نمایش
-const getRelativeTime = (dateString: string) => {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
-
-  if (diffInHours < 1) {
-    return 'همین الان';
-  } else if (diffInHours < 24) {
-    return `${ Math.floor(diffInHours) } ساعت پیش`;
-  } else {
-    return `${ Math.floor(diffInHours / 24) } روز پیش`;
-  }
-}; if (loading) {
   return (
-    <View style={styles.center}>
-      <ActivityIndicator size="large" color="#007AFF" />
-      <Text style={styles.loadingText}>در حال بارگذاری مکالمات...</Text>
-    </View>
-  );
-}
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>💬 مکالمات من</Text>
+        <Text style={styles.subtitle}>{chatRooms.length} مکالمه</Text>
+      </View>
 
-return (
-  <View style={styles.container}>
-    <View style={styles.header}>
-      <Text style={styles.title}>💬 مکالمات من</Text>
-      <Text style={styles.subtitle}>{chatRooms.length} مکالمه</Text>
-    </View>
+      <FlatList
+        data={chatRooms}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={styles.chatItem}
+            onPress={() => router.push({
+              pathname: "/chat/[roomId]",
+              params: { roomId: item.id }
+            } as any)}
+          >
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {item.other_user_name.charAt(0)}
+              </Text>
+            </View>
 
-    <FlatList
-      data={chatRooms}
-      keyExtractor={(item) => item.id}
-      renderItem={({ item }) => (
-        <TouchableOpacity
-          style={styles.chatItem}
-          onPress={() => router.push({
-            pathname: "/chat/[roomId]",
-            params: { roomId: item.id }
-          } as any)}
-        >
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {item.other_user_name.charAt(0)}
-            </Text>
-          </View>
+            <View style={styles.chatInfo}>
+              <Text style={styles.userName}>{item.other_user_name}</Text>
+              <Text style={styles.lastMessage} numberOfLines={1}>
+                {item.last_message}
+              </Text>
+            </View>
 
-          <View style={styles.chatInfo}>
-            <Text style={styles.userName}>{item.other_user_name}</Text>
-            <Text style={styles.lastMessage} numberOfLines={1}>
-              {item.last_message}
-            </Text>
-          </View>
-
-          <View style={styles.timeContainer}>
-            <Text style={styles.time}>
-              {getRelativeTime(item.last_message_at)}
-            </Text>
-            {/* <View style={styles.unreadBadge}>
+            <View style={styles.timeContainer}>
+              <Text style={styles.time}>
+                {getRelativeTime(item.last_message_at)}
+              </Text>
+              {/* <View style={styles.unreadBadge}>
                 <Text style={styles.unreadText}>3</Text>
               </View> */}
+            </View>
+          </TouchableOpacity>
+        )}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>هنوز هیچ مکالمه‌ای ندارید</Text>
+            <Text style={styles.emptySubText}>برای شروع یک چت جدید، با کسی پیام بدهید</Text>
           </View>
-        </TouchableOpacity>
-      )}
-      ListEmptyComponent={
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>هنوز هیچ مکالمه‌ای ندارید</Text>
-          <Text style={styles.emptySubText}>برای شروع یک چت جدید، با کسی پیام بدهید</Text>
-        </View>
-      }
-    />
-  </View>
-);
+        }
+      />
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({

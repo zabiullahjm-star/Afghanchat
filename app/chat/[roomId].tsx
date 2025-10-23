@@ -25,6 +25,7 @@ interface Message {
 
 export default function ChatScreen() {
     const { roomId, otherUserName } = useLocalSearchParams();
+    const roomIdString = Array.isArray(roomId) ? roomId[0] : roomId;
     const router = useRouter();
     const [messages, setMessages] = useState<Message[]>([]);
     const [newMessage, setNewMessage] = useState('');
@@ -36,7 +37,10 @@ export default function ChatScreen() {
     useEffect(() => {
         getCurrentUser();
         fetchMessages();
-        subscribeToMessages();
+        const stopListening = subscribeToMessages();
+        return () => {
+            stopListening();
+        };
     }, [roomId]);
 
     // دریافت کاربر فعلی
@@ -62,6 +66,7 @@ export default function ChatScreen() {
             }
 
             if (data) {
+                // فقط پیام‌های این چت روم رو نشون بده
                 setMessages(data as Message[]);
             }
 
@@ -73,27 +78,46 @@ export default function ChatScreen() {
     };
 
     // گوش دادن به پیام‌های جدید
+
+    // به جاش این تابع جدید رو اضافه کن:
     const subscribeToMessages = () => {
+        console.log('📡 درحال گوش دادن به پیام‌های جدید برای room:', roomId);
+
         const subscription = supabase
-            .channel('room-messages')
-            .on('postgres_changes',
+            .channel(`room - ${roomId}`)
+            .on(
+                'postgres_changes',
                 {
                     event: 'INSERT',
                     schema: 'public',
                     table: 'messages',
-                    filter: `chat_room_id = eq.${roomId}`
+                    filter: `chat_room_id = eq.${roomIdString}`
                 },
                 (payload) => {
-                    setMessages(prev => [...prev, payload.new as Message]);
-                    // اسکرول به پایین وقتی پیام جدید میاد
+                    console.log('🔔 پیام جدید دریافت شد:', payload.new);
+
+                    // اضافه کردن پیام جدید به لیست
+                    setMessages(prev => {
+                        const newMessage = payload.new as Message;
+                        // جلوگیری از duplicate
+                        if (prev.some(msg => msg.id === newMessage.id)) {
+                            return prev;
+                        }
+                        return [...prev, newMessage];
+                    });
+
+                    // اسکرول به پایین
                     setTimeout(() => {
                         flatListRef.current?.scrollToEnd({ animated: true });
                     }, 100);
                 }
             )
-            .subscribe();
+            .subscribe((status) => {
+                console.log('📡 وضعیت subscription:', status);
+            });
 
         return () => {
+            console.log('🔴 متوقف کردن subscription');
             subscription.unsubscribe();
         };
     };
@@ -208,7 +232,7 @@ export default function ChatScreen() {
         <KeyboardAvoidingView
             style={styles.container}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 150 : 50}
         >
             {/* هدر چت - زیباتر و کوچک‌تر */}
             <View style={styles.header}>
@@ -393,7 +417,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'white',
         borderTopWidth: 1,
         borderTopColor: '#e9ecef',
-        paddingBottom: Platform.OS === 'ios' ? 25 : 16
+        paddingBottom: Platform.OS === 'ios' ? 40 : 30
     },
     textInput: {
         flex: 1,
