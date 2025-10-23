@@ -35,12 +35,13 @@ export default function LoginScreen() {
             Alert.alert('خطا', 'رمز عبور باید حداقل ۶ کاراکتر باشد');
             return;
         }
+        setEmail(email.toLowerCase().trim());
 
         try {
             setLoading(true);
 
             const { data, error } = await supabase.auth.signInWithPassword({
-                email: email.toLowerCase().trim(),
+                email: email,
                 password: password,
             });
 
@@ -49,13 +50,15 @@ export default function LoginScreen() {
             }
 
             if (data.user) {
-                // پیام موفقیت ولی هدایت خودکار توسط _layout.tsx انجام میشه
-                console.log('ورود موفقیت‌آمیز');
-                // صفحه به صورت خودکار توسط Auth State Change آپدیت میشه
+                Alert.alert('موفق', 'ورود با موفقیت انجام شد', [
+                    { text: 'OK', onPress: () => router.replace('/(tabs)') }
+                ]);
             }
 
         } catch (error: any) {
-            Alert.alert('خطا', error.message || 'خطایی در ورود رخ داده است');
+            Alert.alert('خطا', error.message === 'Invalid login credentials'
+                ? 'ایمیل یا رمز عبور اشتباه است'
+                :error.message || 'خطایی در ورود رخ داده است');
         } finally {
             setLoading(false);
         }
