@@ -49,11 +49,12 @@ export default function ContactsScreen() {
             setSearching(true);
 
             const query = searchQuery.trim().toLowerCase();
+            const searchPattern = `%${query}%`;
 
             const { data, error } = await supabase
                 .from('profiles')
                 .select('*')
-                .or(`full_name.ilike.% ${query} %, username.ilike.% ${query} %, phone.ilike.% ${query} %`)
+                .or(`full_name.ilike.% ${query} %, username.ilike.${searchPattern},username.ilike.${searchPattern}`)
                 .neq('id', currentUser?.id)
                 .order('full_name', { ascending: true })
                 .limit(50);
