@@ -34,15 +34,21 @@ export default function ChatScreen() {
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const flatListRef = useRef<FlatList>(null);
 
+    // به جاش این رو اضافه کن:
     useEffect(() => {
         getCurrentUser();
         fetchMessages();
-        const stopListening = subscribeToMessages();
+
+        // هر ۳ ثانیه چک کن پیام جدیدی اومده یا نه
+        const interval = setInterval(() => {
+            checkForNewMessages();
+        }, 3000);
+
+        // وقتی از صفحه خارج میشی interval رو پاک کن
         return () => {
-            stopListening();
+            clearInterval(interval);
         };
     }, [roomId]);
-
     // دریافت کاربر فعلی
     const getCurrentUser = async () => {
         const { data: { user } } = await supabase.auth.getUser();
@@ -53,23 +59,7 @@ export default function ChatScreen() {
     const fetchMessages = async () => {
         try {
             setFetching(true);
-
-            const { data, error } = await supabase
-                .from('messages')
-                .select('*')
-                .eq('chat_room_id', roomId)
-                .order('created_at', { ascending: true });
-
-            if (error) {
-                console.error('خطا در دریافت پیام‌ها:', error);
-                return;
-            }
-
-            if (data) {
-                // فقط پیام‌های این چت روم رو نشون بده
-                setMessages(data as Message[]);
-            }
-
+            await checkForNewMessages();
         } catch (error) {
             console.error('خطا:', error);
         } finally {
@@ -79,47 +69,31 @@ export default function ChatScreen() {
 
     // گوش دادن به پیام‌های جدید
 
-    // به جاش این تابع جدید رو اضافه کن:
+    // این تابع رو کاملاً پاک کن
     const subscribeToMessages = () => {
-        console.log('📡 درحال گوش دادن به پیام‌های جدید برای room:', roomId);
+        // کل این تابع رو پاک کن
+    };
 
-        const subscription = supabase
-            .channel(`room - ${roomId}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'messages',
-                    filter: `chat_room_id = eq.${roomIdString}`
-                },
-                (payload) => {
-                    console.log('🔔 پیام جدید دریافت شد:', payload.new);
+    // به جاش این رو اضافه کن:
+    const checkForNewMessages = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('messages')
+                .select('*')
+                .eq('chat_room_id', roomIdString)
+                .order('created_at', { ascending: true });
 
-                    // اضافه کردن پیام جدید به لیست
-                    setMessages(prev => {
-                        const newMessage = payload.new as Message;
-                        // جلوگیری از duplicate
-                        if (prev.some(msg => msg.id === newMessage.id)) {
-                            return prev;
-                        }
-                        return [...prev, newMessage];
-                    });
+            if (error) {
+                console.error('خطا در چک کردن پیام‌های جدید:', error);
+                return;
+            }
 
-                    // اسکرول به پایین
-                    setTimeout(() => {
-                        flatListRef.current?.scrollToEnd({ animated: true });
-                    }, 100);
-                }
-            )
-            .subscribe((status) => {
-                console.log('📡 وضعیت subscription:', status);
-            });
-
-        return () => {
-            console.log('🔴 متوقف کردن subscription');
-            subscription.unsubscribe();
-        };
+            if (data) {
+                setMessages(data as Message[]);
+            }
+        } catch (error) {
+            console.error('خطا در چک کردن پیام‌ها:', error);
+        }
     };
 
     // ارسال پیام جدید به دیتابیس
@@ -129,7 +103,7 @@ export default function ChatScreen() {
         const messageToSend = {
             content: newMessage.trim(),
             sender_id: currentUser.id,
-            chat_room_id: roomId,
+            chat_room_id: roomIdString,
             message_type: 'text',
             read: false
         };
@@ -139,7 +113,7 @@ export default function ChatScreen() {
 
             // پیام موقت برای UX بهتر
             const tempMessage: Message = {
-                id: `temp - ${Date.now()
+                id: `temp-${Date.now()
                     }`,
                 content: newMessage.trim(),
                 sender_id: currentUser.id,

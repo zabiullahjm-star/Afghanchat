@@ -17,16 +17,31 @@ export default function ChatListScreen() {
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
 
+
+  // به جاش این دو تا useEffect اضافه کن:
   useEffect(() => {
     getCurrentUser();
-    fetchChatRooms();
-    subscribeToNewMessages();
   }, []);
-  const getCurrentUser = async () => {
-    const { data: {user} } = await supabase.auth.getUser();
-    setCurrentUser(user);
-  };
 
+  useEffect(() => {
+    if (currentUser) {
+      console.log('کاربر دریافت شد:', currentUser.id);
+      fetchChatRooms();
+    }
+  }, [currentUser]);
+
+  // عوض کن به:
+  const getCurrentUser = async () => {
+    try {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (error) throw error;
+      console.log('کاربر:', user ? user.id : 'null');
+      setCurrentUser(user);
+    } catch (error) {
+      console.error('خطا در دریافت کاربر:', error);
+      setCurrentUser(null);
+    }
+  };
 
   // به جاش این تابع جدید رو اضافه کن:
   const fetchChatRooms = async () => {
@@ -39,7 +54,7 @@ export default function ChatListScreen() {
       const { data, error } = await supabase
         .from('messages')
         .select('*')
-        .or(`sender_id.eq.${ currentUser.id }, chat_room_id.ilike.% ${ currentUser.id } %`)
+        .or(`sender_id.eq.${currentUser.id}, chat_room_id.like.% ${currentUser.id} %`)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -60,47 +75,27 @@ export default function ChatListScreen() {
 
   // گوش دادن به پیام‌های جدید برای آپدیت لیست چت‌ها
   const subscribeToNewMessages = () => {
-    const subscription = supabase
-      .channel('new-messages')
-      .on('postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages'
-        },
-        (payload) => {
-          console.log('پیام جدید برای آپدیت لیست:', payload);
-          // وقتی پیام جدید میاد، لیست رو آپدیت کن
-          fetchChatRooms();
-        }
-      )
-      .subscribe();
+    //const subscription = supabase
+    //.channel('new-messages')
+    // .on('postgres_changes',
+    // {
+    //   event: 'INSERT',
+    //   schema: 'public',
+    ////   table: 'messages'
+    // },
+    // (payload) => {
+    //   console.log('پیام جدید برای آپدیت لیست:', payload);
+    // وقتی پیام جدید میاد، لیست رو آپدیت کن
+    //    fetchChatRooms();
+    //  }
+    // )
+    //  .subscribe();
 
-    return () => {
-      subscription.unsubscribe();
-    };
+    // return () => {
+    //    subscription.unsubscribe();
+    //  };
   };
 
-  // تابع کمکی برای پردازش داده‌های دیتابیس
-  const processChatRoomsFromMessages = (messages: any[]): ChatRoom[] => {
-    const roomMap = new Map();
-
-    messages.forEach(message => {
-      if (!roomMap.has(message.chat_room_id)) {
-        roomMap.set(message.chat_room_id, {
-          id: message.chat_room_id,
-          created_at: message.created_at,
-          last_message: message.content,
-          last_message_at: message.created_at,
-          other_user_name: ` کاربر ${message.chat_room_id}`
-        });
-      }
-    });
-
-    return Array.from(roomMap.values());
-  };
-
- 
   // محاسبه زمان نسبی برای نمایش
   const getRelativeTime = (dateString: string) => {
     const date = new Date(dateString);
@@ -114,11 +109,15 @@ export default function ChatListScreen() {
     } else {
       return `${Math.floor(diffInHours / 24)} روز پیش`;
     }
-  }; if (loading) {
+  };
+
+  if (loading || !currentUser) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>در حال بارگذاری مکالمات...</Text>
+        <Text style={styles.loadingText}>
+          {!currentUser ? 'در حال دریافت اطلاعات کاربر...' : 'در حال بارگذاری مکالمات...'}
+        </Text>
       </View>
     );
   }
@@ -132,19 +131,19 @@ export default function ChatListScreen() {
         const otherUserId = message.chat_room_id
           .replace(`room_`, '')
           .split('_')
-          .find((id:string) => id !== userId);
+          .find((id: string) => id !== userId);
 
         roomMap.set(message.chat_room_id, {
           id: message.chat_room_id,
           last_message: message.content,
           last_message_at: message.created_at,
-          other_user_name: otherUserId ?` کاربر ${ otherUserId.substring(0, 8) } `: 'کاربر'
-      });
-  }
-});
+          other_user_name: otherUserId ? ` کاربر ${otherUserId.substring(0, 8)} ` : 'کاربر'
+        });
+      }
+    });
 
-return Array.from(roomMap.values());
-};
+    return Array.from(roomMap.values());
+  };
 
   return (
     <View style={styles.container}>
