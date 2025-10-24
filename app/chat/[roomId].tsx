@@ -206,7 +206,7 @@ export default function ChatScreen() {
         <KeyboardAvoidingView
             style={styles.container}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 150 : 50}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 150 : 80}
         >
             {/* هدر چت - زیباتر و کوچک‌تر */}
             <View style={styles.header}>
@@ -279,26 +279,26 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#f8f9fa'
+        backgroundColor: '#eff1f3ff'
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         backgroundColor: '#007AFF',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        paddingTop: 60,
+        paddingHorizontal: 1,
+        paddingVertical: 1,
+        paddingTop: 1,
         borderBottomLeftRadius: 20,
         borderBottomRightRadius: 20,
-        elevation: 4,
+        elevation: 1,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
+        shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.1,
         shadowRadius: 8
     },
     backButton: {
-        padding: 8
+        padding: 1
     },
     backButtonText: {
         color: 'white',
@@ -311,16 +311,16 @@ const styles = StyleSheet.create({
     },
     headerTitle: {
         color: 'white',
-        fontSize: 18,
+        fontSize: 25,
         fontWeight: 'bold'
     },
     headerSubtitle: {
         color: 'rgba(255,255,255,0.8)',
         fontSize: 12,
-        marginTop: 2
+        marginTop: 1
     },
     headerPlaceholder: {
-        width: 40
+        width: 20
     },
     messagesList: {
         flex: 1
@@ -351,10 +351,10 @@ const styles = StyleSheet.create({
         borderBottomRightRadius: 6
     },
     otherMessageBubble: {
-        backgroundColor: 'white',
+        backgroundColor: '#296645ff',
         borderBottomLeftRadius: 6,
         elevation: 2,
-        shadowColor: '#000',
+        shadowColor: '#080303ff',
         shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.1,
         shadowRadius: 4
@@ -369,7 +369,7 @@ const styles = StyleSheet.create({
     myMessageText: {
         color: 'white'
     }, otherMessageText: {
-        color: '#1a1a1a'
+        color: 'white'
     },
     messageTime: {
         fontSize: 10,
@@ -377,21 +377,21 @@ const styles = StyleSheet.create({
         opacity: 0.7
     },
     myMessageTime: {
-        color: 'rgba(255,255,255,0.7)',
+        color: 'white',
         textAlign: 'right'
     },
     otherMessageTime: {
-        color: 'rgba(0,0,0,0.5)',
+        color: 'white',
         textAlign: 'left'
     },
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'flex-end',
-        padding: 16,
+        padding: 1,
         backgroundColor: 'white',
         borderTopWidth: 1,
-        borderTopColor: '#e9ecef',
-        paddingBottom: Platform.OS === 'ios' ? 40 : 30
+        borderTopColor: '#1b2936ff',
+        paddingBottom: Platform.OS === 'ios' ? 40 : 5
     },
     textInput: {
         flex: 1,
@@ -407,7 +407,7 @@ const styles = StyleSheet.create({
         textAlign: 'right'
     },
     sendButton: {
-        backgroundColor: '#007AFF',
+        backgroundColor: '#6dad88ff',
         width: 48,
         height: 48,
         borderRadius: 24,

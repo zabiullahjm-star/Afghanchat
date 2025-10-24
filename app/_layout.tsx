@@ -63,7 +63,7 @@ export default function RootLayout() {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [router, segments]);
 
 
   if (loading) {
