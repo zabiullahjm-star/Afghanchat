@@ -42,6 +42,29 @@ export default function ChatListScreen() {
       setCurrentUser(null);
     }
   };
+  const processUserChatRooms = (messages: any[], userId: string): ChatRoom[] => {
+    const roomMap = new Map();
+
+    messages.forEach(message => {
+      if (!roomMap.has(message.chat_room_id)) {
+
+        // به جاش این رو اضافه کن:
+        const roomParts = message.chat_room_id.replace('room_', '').split('_');
+        const otherUserId = roomParts.find((id: string) => id !== userId);
+        const otherUserName = otherUserId ? ` کاربر ${otherUserId.substring(0, 8)} ` : 'کاربر'
+
+        roomMap.set(message.chat_room_id, {
+          id: message.chat_room_id,
+          last_message: message.content,
+          last_message_at: message.created_at,
+          other_user_name: otherUserName
+        });
+      }
+    });
+
+    return Array.from(roomMap.values());
+  };
+
 
   // به جاش این تابع جدید رو اضافه کن:
   const fetchChatRooms = async () => {
@@ -54,7 +77,7 @@ export default function ChatListScreen() {
       const { data, error } = await supabase
         .from('messages')
         .select('*')
-        .or(`sender_id.eq.${currentUser.id}, chat_room_id.like.% ${currentUser.id} %`)
+        .or(`sender_id.eq.${currentUser.id}, chat_room_id.ilike.% ${currentUser.id} %`)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -122,28 +145,6 @@ export default function ChatListScreen() {
     );
   }
   // این تابع رو اضافه کن:
-  const processUserChatRooms = (messages: any[], userId: string): ChatRoom[] => {
-    const roomMap = new Map();
-
-    messages.forEach(message => {
-      if (!roomMap.has(message.chat_room_id)) {
-        // استخراج نام کاربر دیگر از roomId
-        const otherUserId = message.chat_room_id
-          .replace(`room_`, '')
-          .split('_')
-          .find((id: string) => id !== userId);
-
-        roomMap.set(message.chat_room_id, {
-          id: message.chat_room_id,
-          last_message: message.content,
-          last_message_at: message.created_at,
-          other_user_name: otherUserId ? ` کاربر ${otherUserId.substring(0, 8)} ` : 'کاربر'
-        });
-      }
-    });
-
-    return Array.from(roomMap.values());
-  };
 
   return (
     <View style={styles.container}>
