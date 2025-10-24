@@ -4,10 +4,13 @@ import { supabase } from '../lib/supabaseClient';
 import { Session } from '@supabase/supabase-js';
 import { ActivityIndicator, View, Text } from 'react-native';
 import UpdateChecker from '../components/UpdateChecker';
+import { useRouter, useSegments } from 'expo-router'
 
 export default function RootLayout() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const segments = useSegments();
 
   useEffect(() => {
     // تابع برای بررسی session
@@ -16,6 +19,20 @@ export default function RootLayout() {
         const { data: { session } } = await supabase.auth.getSession();
         console.log('Session checked:', session ? 'User logged in' : 'No user');
         setSession(session);
+
+        // بعد از دریافت session، هدایت کن
+        if (!session) {
+          if (segments[0] !== '(auth)') {
+            console.log('Redirecting to auth');
+            router.replace('/(auth)/login');
+          }
+        } else {
+          if (segments[0] === '(auth)') {
+            console.log('Redirecting to tabs');
+            router.replace('/(tabs)');
+          }
+        }
+
       } catch (error) {
         console.error('Error checking session:', error);
         setSession(null);
@@ -30,11 +47,24 @@ export default function RootLayout() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log('Auth state changed:', event, session ? 'User logged in' : 'No user');
       setSession(session);
+
+      // بعد از تغییر auth state، هدایت کن
+      if (!session) {
+        if (segments[0] !== '(auth)') {
+          router.replace('/(auth)/login');
+        }
+      } else {
+        if (segments[0] === '(auth)') {
+          router.replace('/(tabs)');
+        }
+      }
+
       setLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
 
   if (loading) {
     return (
@@ -48,20 +78,20 @@ export default function RootLayout() {
   console.log('Rendering layout - Session:', session ? 'Exists' : 'None');
 
   return (
-    <View style={{flex: 1}}>
-    <UpdateChecker/>
-    <Stack screenOptions={{ headerShown: false }}>
-      {!session ? (
-        // کاربر لاگین نکرده
-        <Stack.Screen name="(auth)" options={{headerShown: false }} />
-      ) : (
-        // کاربر لاگین کرده
-        <>
-          <Stack.Screen name="(tabs)" options={{headerShown: false}} />
-          <Stack.Screen name="chat/[roomId]" options={{ headerShown: false }} />
-        </>
-      )}
-    </Stack>
+    <View style={{ flex: 1 }}>
+      <UpdateChecker />
+      <Stack screenOptions={{ headerShown: false }}>
+        {!session ? (
+          // کاربر لاگین نکرده
+          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+        ) : (
+          // کاربر لاگین کرده
+          <>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="chat/[roomId]" options={{ headerShown: false }} />
+          </>
+        )}
+      </Stack>
     </View>
   );
 }
