@@ -16,85 +16,91 @@ export default function ChatListScreen() {
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
-
-
-  // به جاش این دو تا useEffect اضافه کن:
   useEffect(() => {
+    const getCurrentUser = async () => {
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser();
+        if (error) throw error;
+        setCurrentUser(user);
+      } catch (error) {
+        console.error('خطا در دریافت کاربر:', error);
+        setCurrentUser(null);
+      }
+    };
+
     getCurrentUser();
+
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUser(session?.user || null);
+    });
+
+    return () => {
+      data.subscription.unsubscribe(); // ← حالا درست شد
+    };
   }, []);
 
   useEffect(() => {
-    if (currentUser) {
-      console.log('کاربر دریافت شد:', currentUser.id);
-      fetchChatRooms();
+    if (!currentUser) {
+      setChatRooms([]); // بعد از logout لیست خالی شود
+      return;
     }
-  }, [currentUser]);
 
-  // عوض کن به:
-  const getCurrentUser = async () => {
-    try {
-      const { data: { user }, error } = await supabase.auth.getUser();
-      if (error) throw error;
-      console.log('کاربر:', user ? user.id : 'null');
-      setCurrentUser(user);
-    } catch (error) {
-      console.error('خطا در دریافت کاربر:', error);
-      setCurrentUser(null);
-    }
-  };
-  const processUserChatRooms = (messages: any[], userId: string): ChatRoom[] => {
-    const roomMap = new Map();
+    const fetchChatRooms = async () => {
+      try {
+        setLoading(true);
+        const { data, error } = await supabase
+          .from('messages')
+          .select('*')
+          .or(`sender_id.eq.${ currentUser.id }, receiver_id.eq.${ currentUser.id }`)
+          .order('created_at', { ascending: false });
 
-    messages.forEach(message => {
-      if (!roomMap.has(message.chat_room_id)) {
+        if (error) throw error;
 
-        // به جاش این رو اضافه کن:
-        const roomParts = message.chat_room_id.replace('room_', '').split('_');
-        const otherUserId = roomParts.find((id: string) => id !== userId);
-        const otherUserName = otherUserId ? ` کاربر ${otherUserId.substring(0, 8)} ` : 'کاربر'
-
-        roomMap.set(message.chat_room_id, {
-          id: message.chat_room_id,
-          last_message: message.content,
-          last_message_at: message.created_at,
-          other_user_name: otherUserName
+        if (data) {
+          const roomMap = new Map();
+          data.forEach(message => {
+            if (!roomMap.has(message.chat_room_id)) {
+              const roomParts = message.chat_room_id.replace('room_', '').split('_');
+              const otherUserId = roomParts.find((id:string) => id !== currentUser.id);
+              const otherUserName = otherUserId ?` کاربر ${ otherUserId.substring(0, 8)
+            } `: 'کاربر';
+            roomMap.set(message.chat_room_id, {
+              id: message.chat_room_id,
+              last_message: message.content,
+              last_message_at: message.created_at,
+              other_user_name: otherUserName
+            });
+          }
         });
-      }
-    });
-
-    return Array.from(roomMap.values());
-  };
-
-
-  // به جاش این تابع جدید رو اضافه کن:
-  const fetchChatRooms = async () => {
-    if (!currentUser) return;
-
-    try {
-      setLoading(true);
-
-      // فقط چت‌هایی رو بگیر که کاربر currentUser در اونها پیام داره
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .or(`sender_id.eq.${currentUser.id}, chat_room_id.ilike.% ${currentUser.id} %`)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      if (data) {
-        // پردازش داده‌ها برای نمایش فقط چت‌های کاربر
-        const userChatRooms = processUserChatRooms(data, currentUser.id);
-        setChatRooms(userChatRooms);
-      }
-
+  setChatRooms(Array.from(roomMap.values()));
+}
     } catch (error) {
-      console.error('خطا در دریافت چت‌ها:', error);
-      setChatRooms([]);
-    } finally {
-      setLoading(false);
-    }
+  console.error('خطا در دریافت چت‌ها:', error);
+  setChatRooms([]);
+} finally {
+  setLoading(false);
+}
   };
+
+fetchChatRooms();
+
+const channel = supabase
+  .channel('public:messages')
+  .on('postgres_changes', {
+    event: 'INSERT',
+    schema: 'public',
+    table: 'messages',
+    filter: `sender_id = eq.${ currentUser.id }`
+    }, payload => {
+  fetchChatRooms();
+})
+    .subscribe();
+
+return () => {
+  channel.unsubscribe();
+};
+}, [currentUser]); 
+
 
   // محاسبه زمان نسبی برای نمایش
   const getRelativeTime = (dateString: string) => {
