@@ -144,7 +144,7 @@ export default function ContactsScreen() {
                 <View style={[styles.searchInputContainer, searchFocused && styles.searchInputFocused]}>
                     <TextInput
                         style={styles.searchInput}
-                        placeholder="جستجو با نام، نام کاربری یا شماره..."
+                        placeholder="جستجو با نام، نام کاربری "
                         placeholderTextColor="#999"
                         value={searchQuery}
                         onChangeText={setSearchQuery}
@@ -308,7 +308,7 @@ const styles = StyleSheet.create({
         opacity: 0.6
     },
     searchButtonText: {
-        color: 'white',
+        color: '#127e1bff',
         fontSize: 16,
         fontWeight: 'bold'
     },
