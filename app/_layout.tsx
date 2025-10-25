@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import { Session } from '@supabase/supabase-js';
 import { ActivityIndicator, View, Text } from 'react-native';
 import UpdateChecker from '../components/UpdateChecker';
-import { useRouter, useSegments } from 'expo-router'
+import { useRouter, useSegments } from 'expo-router';
 
 export default function RootLayout() {
   const [session, setSession] = useState<Session | null>(null);
@@ -13,58 +13,42 @@ export default function RootLayout() {
   const segments = useSegments();
 
   useEffect(() => {
-    // تابع برای بررسی session
-    const checkSession = async () => {
+    let mounted = true;
+
+    const initSession = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        console.log('Session checked:', session ? 'User logged in' : 'No user');
-        setSession(session);
-
-        // بعد از دریافت session، هدایت کن
-        if (!session) {
-          if (segments[0] !== '(auth)') {
-            console.log('Redirecting to auth');
-            router.replace('/(auth)/login');
-          }
-        } else {
-          if (segments[0] === '(auth)') {
-            console.log('Redirecting to tabs');
-            router.replace('/(tabs)');
-          }
+        const { data } = await supabase.auth.getSession();
+        if (mounted) {
+          setSession(data.session ?? null);
         }
-
-      } catch (error) {
-        console.error('Error checking session:', error);
-        setSession(null);
+      } catch (err) {
+        console.error('Session check error:', err);
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
 
-    checkSession();
+    initSession();
 
-    // گوش دادن به تغییرات auth
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log('Auth state changed:', event, session ? 'User logged in' : 'No user');
-      setSession(session);
-
-      // بعد از تغییر auth state، هدایت کن
-      if (!session) {
-        if (segments[0] !== '(auth)') {
-          router.replace('/(auth)/login');
-        }
-      } else {
-        if (segments[0] === '(auth)') {
-          router.replace('/(tabs)');
-        }
-      }
-
-      setLoading(false);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (mounted) setSession(session);
     });
 
-    return () => subscription.unsubscribe();
-  }, [router, segments]);
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
+  useEffect(() => {
+    if (!loading) {
+      if (!session && segments[0] !== '(auth)') {
+        router.replace('/(auth)/login');
+      } else if (session && segments[0] === '(auth)') {
+        router.replace('/(tabs)');
+      }
+    }
+  }, [session, loading, segments]);
 
   if (loading) {
     return (
@@ -75,17 +59,13 @@ export default function RootLayout() {
     );
   }
 
-  console.log('Rendering layout - Session:', session ? 'Exists' : 'None');
-
   return (
     <View style={{ flex: 1 }}>
       <UpdateChecker />
       <Stack screenOptions={{ headerShown: false }}>
         {!session ? (
-          // کاربر لاگین نکرده
           <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         ) : (
-          // کاربر لاگین کرده
           <>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="chat/[roomId]" options={{ headerShown: false }} />
