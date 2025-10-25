@@ -96,29 +96,6 @@ export default function ChatListScreen() {
     }
   };
 
-  // گوش دادن به پیام‌های جدید برای آپدیت لیست چت‌ها
-  const subscribeToNewMessages = () => {
-    //const subscription = supabase
-    //.channel('new-messages')
-    // .on('postgres_changes',
-    // {
-    //   event: 'INSERT',
-    //   schema: 'public',
-    ////   table: 'messages'
-    // },
-    // (payload) => {
-    //   console.log('پیام جدید برای آپدیت لیست:', payload);
-    // وقتی پیام جدید میاد، لیست رو آپدیت کن
-    //    fetchChatRooms();
-    //  }
-    // )
-    //  .subscribe();
-
-    // return () => {
-    //    subscription.unsubscribe();
-    //  };
-  };
-
   // محاسبه زمان نسبی برای نمایش
   const getRelativeTime = (dateString: string) => {
     const date = new Date(dateString);
