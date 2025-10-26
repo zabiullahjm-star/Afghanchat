@@ -51,7 +51,7 @@ export default function ChatListScreen() {
         const { data, error } = await supabase
           .from('messages')
           .select('*')
-          .or(`sender_id.eq.${ currentUser.id }, receiver_id.eq.${ currentUser.id }`)
+          .or(`sender_id.eq.${currentUser.id}, receiver_id.eq.${currentUser.id}`)
           .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -61,45 +61,45 @@ export default function ChatListScreen() {
           data.forEach(message => {
             if (!roomMap.has(message.chat_room_id)) {
               const roomParts = message.chat_room_id.replace('room_', '').split('_');
-              const otherUserId = roomParts.find((id:string) => id !== currentUser.id);
-              const otherUserName = otherUserId ?` کاربر ${ otherUserId.substring(0, 8)
-            } `: 'کاربر';
-            roomMap.set(message.chat_room_id, {
-              id: message.chat_room_id,
-              last_message: message.content,
-              last_message_at: message.created_at,
-              other_user_name: otherUserName
-            });
-          }
-        });
-  setChatRooms(Array.from(roomMap.values()));
-}
-    } catch (error) {
-  console.error('خطا در دریافت چت‌ها:', error);
-  setChatRooms([]);
-} finally {
-  setLoading(false);
-}
-  };
+              const otherUserId = roomParts.find((id: string) => id !== currentUser.id);
+              const otherUserName = otherUserId ? ` کاربر ${otherUserId.substring(0, 8)
+                } ` : 'کاربر';
+              roomMap.set(message.chat_room_id, {
+                id: message.chat_room_id,
+                last_message: message.content,
+                last_message_at: message.created_at,
+                other_user_name: otherUserName
+              });
+            }
+          });
+          setChatRooms(Array.from(roomMap.values()));
+        }
+      } catch (error) {
+        console.error('خطا در دریافت چت‌ها:', error);
+        setChatRooms([]);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-fetchChatRooms();
+    fetchChatRooms();
 
-const channel = supabase
-  .channel('public:messages')
-  .on('postgres_changes', {
-    event: 'INSERT',
-    schema: 'public',
-    table: 'messages',
-    filter: `sender_id = eq.${ currentUser.id }`
-    }, payload => {
-  fetchChatRooms();
-})
-    .subscribe();
+    const channel = supabase
+      .channel('public:messages')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `sender_id = eq.${currentUser.id}`
+      }, payload => {
+        fetchChatRooms();
+      })
+      .subscribe();
 
-return () => {
-  channel.unsubscribe();
-};
-}, [currentUser]); 
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [currentUser]);
 
 
   // محاسبه زمان نسبی برای نمایش
@@ -173,7 +173,7 @@ return () => {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>هنوز هیچ مکالمه‌ای ندارید</Text>
-            <Text style={styles.emptySubText}>برای شروع یک چت جدید، با کسی پیام بدهید</Text>
+            <Text style={styles.emptySubText}>برای شروع یک چت جدید، به صفحه مخاطبین رفته کاربر مورد نظر را جستجو کنید</Text>
           </View>
         }
       />
