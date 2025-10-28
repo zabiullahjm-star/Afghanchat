@@ -97,6 +97,7 @@ export default function ContactsScreen() {
                     {
                         chat_room_id: roomId,
                         sender_id: 'system',
+                        receiver_id: profile.id,
                         content: ` چت با ${profile.full_name || 'کاربر'} شروع شد`,
                         message_type: 'system'
                     }
