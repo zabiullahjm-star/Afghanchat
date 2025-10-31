@@ -14,6 +14,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
 import type { User } from '@supabase/supabase-js';
+import { Audio } from 'expo-av'
 
 type Message = {
     id: string;
@@ -21,6 +22,8 @@ type Message = {
     sender_id: string;
     created_at: string;
     read: boolean;
+    message_type?: 'text' | 'audio';
+    audio_url?: string;
 };
 
 export default function ChatScreen() {
@@ -34,6 +37,9 @@ export default function ChatScreen() {
     const [fetching, setFetching] = useState(true);
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [otherUserId, setOtherUserId] = useState<string>('');
+    // recording states
+    const [recording, setRecording] = useState<Audio.Recording | null>(null);
+    const [isRecording, setIsRecording] = useState(false);
 
     const flatListRef = useRef<FlatList<any> | null>(null);
     const intervalRef = useRef<number | null>(null);
@@ -193,18 +199,217 @@ export default function ChatScreen() {
             setLoading(false);
         }
     };
+    const startRecording = async () => {
+        try {
+            const { granted } = await Audio.requestPermissionsAsync();
+            if (!granted) {
+                Alert.alert('اجازه میکروفون لازم است');
+                return;
+            }
 
+            await Audio.setAudioModeAsync({
+                allowsRecordingIOS: true,
+                playsInSilentModeIOS: true,
+            });
+
+            const { recording } = await Audio.Recording.createAsync(
+                Audio.RecordingOptionsPresets.HIGH_QUALITY
+            );
+            setRecording(recording);
+            setIsRecording(true);
+        } catch (err) {
+            console.error('startRecording error', err);
+            Alert.alert('خطا', 'شروع ضبط ممکن نیست');
+        }
+    };
+
+    const stopRecording = async () => {
+        try {
+            if (!recording) return;
+            await recording.stopAndUnloadAsync();
+            const uri = recording.getURI();
+            setIsRecording(false);
+            setRecording(null);
+
+            if (uri) {
+                // آپلود و ارسال ویس
+                await uploadVoiceToSupabase(uri);
+            }
+        } catch (err) {
+            console.error('stopRecording error', err);
+            Alert.alert('خطا', 'متوقف کردن ضبط با مشکل مواجه شد');
+        }
+    };
+    const uploadVoiceToSupabase = async (localUri: string) => {
+        try {
+            setLoading(true);
+            // نام فایل در باکت
+            const fileExt = localUri.split('.').pop() ?? 'm4a';
+            const fileName = `voice_${Date.now()
+                }.${fileExt}`;
+
+            const response = await fetch(localUri);
+            const blob = await response.blob();
+
+            // آپلود به باکت voice-messages (مطابق با نام باکت تو عوض کن)
+            const { data: uploadData, error: uploadError } = await supabase
+                .storage
+                .from('voice-messages')
+                .upload(fileName, blob, { contentType: 'audio/m4a' });
+
+            if (uploadError) {
+                throw uploadError;
+            }
+
+            // گرفتن public url (یا path بسته به نیاز)
+            const { data: publicData } = supabase
+                .storage
+                .from('voice-messages')
+                .getPublicUrl(fileName);
+
+            const publicUrl = publicData?.publicUrl ?? uploadData?.path ?? null;
+            if (!publicUrl) throw new Error('publicUrl not available');
+
+            // ساخت payload پیام صوتی و ذخیره در جدول messages
+            const payload = {
+                sender_id: currentUser?.id,
+                receiver_id: otherUserId,
+                chat_room_id: roomIdString,
+                message_type: 'audio',
+                audio_url: publicUrl,
+                content: '',
+                read: false,
+            };
+
+            const { data, error } = await supabase.from('messages').insert([payload]).select();
+            if (error) throw error;
+
+            if (data && data[0]) {
+                // اگر دوست داری پیام جدید را بلافاصله به state اضافه کن
+                setMessages(prev => [...prev, data[0] as Message]);
+                setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+            }
+        } catch (err) {
+            console.error('uploadVoiceToSupabase error', err);
+            Alert.alert('خطا', 'آپلود ویس موفق نبود');
+        } finally {
+            setLoading(false);
+        }
+    };
+    const sendVoiceMessage = async (uri: string) => {
+        if (!currentUser || !otherUserId || !roomIdString) return;
+
+        const tempId = 'temp_audio_' + Date.now();
+        const temp: Message = {
+            id: tempId,
+            content: '',
+            sender_id: currentUser.id,
+            created_at: new Date().toISOString(),
+            read: false,
+            message_type: 'audio',
+            audio_url: uri
+        };
+
+        setMessages(prev => [...prev, temp]);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+
+        try {
+            setLoading(true);
+            const fileName = `voice_${Date.now()
+                }.mp3`;
+            const { data: uploadData, error: uploadError } = await supabase
+                .storage
+                .from('voice_messages')
+                .upload(fileName, await fetch(uri).then(r => r.blob()), { upsert: true });
+
+            if (uploadError) throw uploadError;
+
+            const { data, error } = await supabase.from('messages').insert([{
+                sender_id: currentUser.id,
+                receiver_id: otherUserId,
+                chat_room_id: roomIdString,
+                message_type: 'audio',
+                audio_url: uploadData.path,
+                read: false
+            }]).select();
+
+            if (error) throw error;
+            if (data && data[0]) setMessages(prev => prev.map(m => m.id === tempId ? data[0] : m));
+        } catch (err) {
+            console.error('sendVoiceMessage', err);
+            setMessages(prev => prev.filter(m => m.id !== tempId));
+            Alert.alert('خطا', 'ارسال ویس موفق نبود');
+        } finally {
+            setLoading(false);
+        }
+    };
+    const playAudio = async (url: string) => {
+        try {
+            // اگر url مسیر publicUrl باشه همین رو پاس بده
+            const { sound } = await Audio.Sound.createAsync({ uri: url });
+            await sound.playAsync();
+
+            sound.setOnPlaybackStatusUpdate((status) => {
+                if (status.isLoaded && status.didJustFinish) {
+                    sound.unloadAsync();
+                }
+            });
+        } catch (err) {
+            console.error('playAudio error', err);
+            Alert.alert('خطا', 'پخش ویس ممکن نیست');
+        }
+    };
     const renderMessage = ({ item }: { item: Message }) => {
         const isMine = item.sender_id === currentUser?.id;
-        const isTemp = typeof item.id === 'string' && item.id.startsWith('temp');
+        const isTemp =
+            typeof item.id === 'string' && item.id.startsWith('temp');
+
         return (
-            <View style={[styles.messageRow, isMine ? styles.myMessageRow : styles.otherMessageRow]}>
-                <View style={[styles.messageBubble, isMine ? styles.myBubble : styles.otherBubble, isTemp && styles.tempMessage]}>
-                    <Text style={[styles.messageText, isMine ? styles.myMessageText : styles.otherMessageText]}>
-                        {item.content}{isTemp ? ' ...' : ''}
-                    </Text>
-                    <Text style={[styles.messageTime, isMine ? styles.myMessageTime : styles.otherMessageTime]}>
-                        {new Date(item.created_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}
+            <View
+                style={[
+                    styles.messageRow,
+                    isMine ? styles.myMessageRow : styles.otherMessageRow,
+                ]}
+            >
+                <View
+                    style={[
+                        styles.messageBubble,
+                        item.message_type === 'audio'
+                            ? styles.voiceBubble
+                            : isMine
+                                ? styles.myBubble
+                                : styles.otherBubble,
+                        isTemp && styles.tempMessage,
+                    ]}
+                >
+                    {item.message_type === 'audio' ? (
+                        <TouchableOpacity onPress={() => playAudio(item.audio_url!)}>
+                            <Text style={{ color: 'white', fontSize: 16 }}>
+                                🔊 پخش صدا
+                            </Text>
+                        </TouchableOpacity>
+                    ) : (
+                        <Text
+                            style={[
+                                styles.messageText,
+                                isMine ? styles.myMessageText : styles.otherMessageText,
+                            ]}
+                        >
+                            {item.content}
+                            {isTemp ? ' ...' : ''}
+                        </Text>
+                    )}
+
+                    <Text
+                        style={[
+                            styles.messageTime,
+                            isMine ? styles.myMessageTime : styles.otherMessageTime,
+                        ]}
+                    >
+                        {new Date(item.created_at).toLocaleTimeString('fa-IR', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                        })}
                     </Text>
                 </View>
             </View>
@@ -265,6 +470,17 @@ export default function ChatScreen() {
                     multiline
                     maxLength={500}
                 />
+
+                {/* میکروفون: نگه دار برای ضبط، رها کن برای ارسال */}
+                <TouchableOpacity
+                    style={[styles.micButton, isRecording && { backgroundColor: 'red' }]}
+                    onPressIn={startRecording}
+                    onPressOut={stopRecording}
+                >
+                    <Text style={styles.micButtonText}>{isRecording ? '■' : '🎤'}</Text>
+                </TouchableOpacity>
+
+                {/* دکمه ارسال متن */}
                 <TouchableOpacity
                     style={[styles.sendButton, (!newMessage.trim() || loading) && styles.sendButtonDisabled]}
                     onPress={sendMessage}
@@ -325,4 +541,27 @@ const styles = StyleSheet.create({
     sendButton: { marginLeft: 8, backgroundColor: '#007AFF', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
     sendButtonDisabled: { backgroundColor: '#9aa5b1' },
     sendButtonText: { color: '#fff', fontSize: 18, fontWeight: '700' },
+    micButton: {
+        marginLeft: 8,
+        backgroundColor: '#3aa55d',
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    micButtonText: {
+        color: 'white',
+        fontSize: 18,
+    },
+    voiceBubble: {
+        backgroundColor: '#4A90E2',
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        borderRadius: 18,
+        maxWidth: '75%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
 });
