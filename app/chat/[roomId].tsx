@@ -16,7 +16,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
 import { User } from '@supabase/supabase-js';
 import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import * as SecureStore from 'expo-secure-store'; // <-- added
 
 // انواع TypeScript
 interface Message {
@@ -25,7 +25,7 @@ interface Message {
     sender_id: string;
     created_at: string;
     read: boolean;
-    message_type: 'text' | 'audio';
+    message_type: 'text' | 'voice';
     audio_url?: string;
 }
 
@@ -44,6 +44,10 @@ export default function ChatRoom() {
     const { roomId, otherUserName } = useLocalSearchParams();
     const router = useRouter();
 
+    // Normalize params: useLocalSearchParams can return string | string[]
+    const roomIdStr: string | null = Array.isArray(roomId) ? (roomId[0] ?? null) : (roomId ?? null);
+    const otherUserNameStr: string | null = Array.isArray(otherUserName) ? (otherUserName[0] ?? null) : (otherUserName ?? null);
+
     // حالت‌ها
     const [messages, setMessages] = useState<Message[]>([]);
     const [newMessage, setNewMessage] = useState('');
@@ -60,6 +64,34 @@ export default function ChatRoom() {
     const flatListRef = useRef<FlatList>(null);
     const recordingTimerRef = useRef<number | null>(null);
     const soundRef = useRef<Audio.Sound | null>(null);
+    const channelRef = useRef<any>(null);
+
+    const CACHE_PREFIX = 'afghanchat:';
+
+    // load cached messages for this room
+    const loadCachedMessages = async (roomIdLocal?: string | null) => {
+        if (!roomIdLocal) return;
+        try {
+            const raw = await SecureStore.getItemAsync(CACHE_PREFIX + 'room:' + roomIdLocal);
+            if (raw) {
+                const parsed = JSON.parse(raw) as Message[];
+                if (parsed && parsed.length > 0) {
+                    setMessages(parsed);
+                }
+            }
+        } catch (e) {
+            console.warn('loadCachedMessages error', e);
+        }
+    };
+
+    const saveCachedMessages = async (roomIdLocal: string | undefined | null, msgs: Message[]) => {
+        if (!roomIdLocal) return;
+        try {
+            await SecureStore.setItemAsync(CACHE_PREFIX + 'room:' + roomIdLocal, JSON.stringify(msgs));
+        } catch (e) {
+            console.warn('saveCachedMessages error', e);
+        }
+    };
 
     // مقداردهی اولیه چت
     useEffect(() => {
@@ -72,8 +104,17 @@ export default function ChatRoom() {
             if (soundRef.current) {
                 soundRef.current.unloadAsync();
             }
-            supabase.removeAllChannels();
+            // cleanup channel امن
+            try {
+                if (channelRef.current) {
+                    supabase.removeChannel(channelRef.current);
+                    channelRef.current = null;
+                }
+            } catch (e) {
+                console.warn('removeChannel error', e);
+            }
         };
+        // keep dependency on original param so effect reruns when route changes
     }, [roomId]);
 
     const initializeChat = async () => {
@@ -89,7 +130,16 @@ export default function ChatRoom() {
                 return;
             }
 
-            // دریافت پیام‌های قبلی
+            // اگر roomId معتبر نیست، از ادامه جلوگیری کن
+            if (!roomIdStr) {
+                console.warn('No roomId provided');
+                setLoading(false);
+                return;
+            }
+            // اول کش محلی رو سریعاً بارگزاری کن تا UI سریع باشه
+            await loadCachedMessages(roomIdStr);
+
+            // دریافت پیام‌های قبلی از سرور و بروزرسانی cache
             await fetchMessages();
 
             // گوش دادن به پیام‌های جدید
@@ -106,14 +156,19 @@ export default function ChatRoom() {
     // دریافت پیام‌ها از دیتابیس
     const fetchMessages = async () => {
         try {
+            if (!roomIdStr) return;
             const { data, error } = await supabase
                 .from('messages')
                 .select('*')
-                .eq('chat_room_id', roomId)
+                .eq('chat_room_id', roomIdStr)
                 .order('created_at', { ascending: true });
 
             if (error) throw error;
-            if (data) setMessages(data as Message[]);
+            if (data) {
+                setMessages(data as Message[]);
+                // ذخیره روی cache
+                await saveCachedMessages(roomIdStr, data as Message[]);
+            }
 
         } catch (error) {
             console.error('خطا در دریافت پیام‌ها:', error);
@@ -123,25 +178,29 @@ export default function ChatRoom() {
 
     // گوش دادن به پیام‌های جدید
     const subscribeToMessages = () => {
-        const subscription = supabase
-            .channel(`room: ${roomId}`)
+        if (!roomIdStr) return;
+        // ساخت کانال مشابه index.tsx و فیلتر سازگار
+        const filterStr = 'chat_room_id.eq.' + roomIdStr;
+        const channel = supabase
+            .channel('public:messages:' + roomIdStr)
             .on('postgres_changes',
                 {
                     event: 'INSERT',
                     schema: 'public',
-                    table: 'messages', filter: `chat_room_id = eq.${roomId}`
+                    table: 'messages',
+                    filter: filterStr
                 },
                 (payload) => {
                     const newMessage = payload.new as Message;
                     setMessages(prev => {
-                        // جلوگیری از duplicate
                         if (prev.some(msg => msg.id === newMessage.id)) {
                             return prev;
                         }
-                        return [...prev, newMessage];
+                        const next = [...prev, newMessage];
+                        // ذخیره کش بعد از دریافت پیام جدید
+                        saveCachedMessages(roomIdStr, next).catch(e => console.warn('saveCachedMessages', e));
+                        return next;
                     });
-
-                    // اسکرول به پایین
                     setTimeout(() => {
                         flatListRef.current?.scrollToEnd({ animated: true });
                     }, 100);
@@ -149,8 +208,17 @@ export default function ChatRoom() {
             )
             .subscribe();
 
+        channelRef.current = channel;
+        // return cleanup function if needed
         return () => {
-            subscription.unsubscribe();
+            try {
+                if (channelRef.current) {
+                    supabase.removeChannel(channelRef.current);
+                    channelRef.current = null;
+                }
+            } catch (e) {
+                console.warn('removeChannel error', e);
+            }
         };
     };
 
@@ -181,7 +249,7 @@ export default function ChatRoom() {
                 .insert([{
                     content: newMessage.trim(),
                     sender_id: currentUser.id,
-                    chat_room_id: roomId,
+                    chat_room_id: roomIdStr,
                     message_type: 'text',
                     read: false
                 }])
@@ -291,41 +359,32 @@ export default function ChatRoom() {
         }
     };
 
-    // آپلود پیام صوتی
+    // آپلود پیام صوتی: استفاده از fetch -> arrayBuffer -> Uint8Array -> upload
     const uploadVoiceMessage = async (localUri: string) => {
         try {
             setLoading(true);
-            console.log('شروع آپلود فایل صوتی از: ' + localUri);
-
-            // ایجاد نام فایل
+            // ساخت نام فایل
             const fileExt = 'm4a';
             const fileName = 'voice_' + Date.now() + '.' + fileExt;
 
-            // ✅ استفاده از FormData برای React Native
-            const formData = new FormData();
-            formData.append('file', {
-                uri: localUri,
-                type: 'audio/m4a',
-                name: fileName,
-            } as any);
+            // دریافت arrayBuffer از uri و تبدیل به Uint8Array (سازگار با سرور)
+            const response = await fetch(localUri);
+            if (!response.ok) throw new Error('Failed to fetch file for upload');
+            const arrayBuffer = await response.arrayBuffer();
+            const uint8 = new Uint8Array(arrayBuffer);
 
-            console.log('FormData ایجاد شد');
-
-            // ✅ آپلود به Supabase با FormData
             const { data: uploadData, error: uploadError } = await supabase
                 .storage
                 .from(BUCKET_NAME)
-                .upload(fileName, formData, {
+                .upload(fileName, uint8, {
                     contentType: 'audio/m4a',
                     upsert: false
                 });
 
             if (uploadError) {
-                console.error('خطای آپلود: ' + (uploadError instanceof Error ? uploadError.message : String(uploadError)));
+                console.error('خطای آپلود:', uploadError);
                 throw uploadError;
             }
-
-            console.log('آپلود موفق');
 
             // دریافت لینک عمومی
             const { data: publicData } = supabase
@@ -334,15 +393,14 @@ export default function ChatRoom() {
                 .getPublicUrl(fileName);
 
             const publicUrl = publicData.publicUrl;
-            console.log('لینک عمومی: ' + publicUrl);
 
-            // ذخیره در دیتابیس
+            // ذخیره در دیتابیس — نوع پیام 'voice' تا با index.tsx سازگار باشد
             const { data, error } = await supabase
                 .from('messages')
                 .insert([{
                     sender_id: currentUser?.id,
-                    chat_room_id: roomId,
-                    message_type: 'audio',
+                    chat_room_id: roomIdStr,
+                    message_type: 'voice',
                     audio_url: publicUrl,
                     content: 'پیام صوتی',
                     read: false
@@ -350,26 +408,27 @@ export default function ChatRoom() {
                 .select();
 
             if (error) {
-                console.error('خطای دیتابیس: ' + (error instanceof Error ? error.message : String(error)));
+                console.error('خطای دیتابیس:', error);
                 throw error;
             }
 
-            console.log('پیام در دیتابیس ذخیره شد');
-
-            // اضافه کردن به لیست
             if (data && data[0]) {
-                setMessages(prev => [...prev, data[0] as Message]);
+                setMessages(prev => {
+                    const next = [...prev, data[0] as Message];
+                    saveCachedMessages(roomIdStr, next).catch(e => console.warn('saveCachedMessages', e));
+                    return next;
+                });
                 scrollToBottom();
-              
             }
 
         } catch (error) {
-            console.error('خطای کامل آپلود: ' + (error instanceof Error ? error.message : String(error)));
-            Alert.alert('خطا', 'آپلود پیام صوتی موفق نبود: ' + (error instanceof Error ? error.message : 'خطای ناشناخته'));
+            console.error('خطای آپلود کامل:', error);
+            Alert.alert('خطا', 'آپلود پیام صوتی موفق نبود');
         } finally {
             setLoading(false);
         }
     };
+
     // پخش پیام صوتی
     const playAudio = async (audioUrl: string) => {
         try {
@@ -433,7 +492,7 @@ export default function ChatRoom() {
     // رندر هر پیام
     const renderMessage = ({ item }: { item: Message }) => {
         const isMyMessage = item.sender_id === currentUser?.id;
-        const isAudio = item.message_type === 'audio';
+        const isAudio = item.message_type === 'voice'; // <-- هماهنگ با upload/index
         const isPlaying = playingAudio === item.audio_url;
 
         return (
@@ -504,24 +563,22 @@ export default function ChatRoom() {
             keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
             <StatusBar barStyle="light-content" />
-
-            {/* هدر */}<View style={styles.header}>
+            {/* هدر */}
+            <View style={styles.header}>
                 <TouchableOpacity
                     style={styles.backButton}
                     onPress={() => router.back()}
                 >
                     <Text style={styles.backButtonText}>←</Text>
                 </TouchableOpacity>
-
                 <View style={styles.headerInfo}>
                     <Text style={styles.headerTitle}>
-                        {otherUserName || 'چت'}
+                        {otherUserNameStr || 'چت'}
                     </Text>
                     <Text style={styles.headerSubtitle}>
                         {messages.length} پیام
                     </Text>
                 </View>
-
                 <View style={styles.headerPlaceholder} />
             </View>
 
@@ -550,9 +607,7 @@ export default function ChatRoom() {
             {isRecording && (
                 <View style={styles.recordingOverlay}>
                     <View style={styles.recordingContainer}>
-                        <Text style={styles.recordingText}>
-                            🔴 در حال ضبط...
-                        </Text>
+                        <Text style={styles.recordingText}>🔴 در حال ضبط...</Text>
                         <Text style={styles.recordingTime}>
                             {formatRecordingTime(recordingDuration)}
                         </Text>
@@ -576,7 +631,6 @@ export default function ChatRoom() {
                     textAlignVertical="center"
                 />
 
-           // در بخش inputContainer، دکمه ضبط رو به این صورت تغییر بده:
                 <TouchableOpacity
                     style={[
                         styles.recordButton,
@@ -585,15 +639,13 @@ export default function ChatRoom() {
                     ]}
                     onPressIn={startRecording}
                     onPressOut={() => stopRecording(isCanceling)}
-                    onLongPress={() => {
-                        // برای تشخیص کشیدن به سمت چپ (لغو)
-                    }}
                     disabled={loading}
                 >
                     <Text style={styles.recordButtonText}>
                         {isCanceling ? '❌' : (isRecording ? '⏹️' : '🎤')}
                     </Text>
                 </TouchableOpacity>
+
                 <TouchableOpacity
                     style={[
                         styles.sendButton,

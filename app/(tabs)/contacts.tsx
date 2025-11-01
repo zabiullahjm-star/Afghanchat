@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
     View,
     Text,
@@ -7,17 +7,23 @@ import {
     TextInput,
     StyleSheet,
     ActivityIndicator,
-    Alert
+    Alert,
+    AppState,
+    Platform,
+    PermissionsAndroid,
+    AppStateStatus, // <-- added
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
 import { User } from '@supabase/supabase-js';
+import * as Contacts from 'expo-contacts';
 
 interface Profile {
     id: string;
     username: string | null;
     full_name: string | null;
     phone: string | null;
+    phone_digits?: string | null;
     avatar_url: string | null;
     created_at: string;
 }
@@ -25,18 +31,126 @@ interface Profile {
 export default function ContactsScreen() {
     const router = useRouter();
     const [profiles, setProfiles] = useState<Profile[]>([]);
+    const [deviceMatches, setDeviceMatches] = useState<Profile[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [searching, setSearching] = useState(false);
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [searchFocused, setSearchFocused] = useState(false);
+    const appStateRef = useRef<AppStateStatus>(AppState.currentState as AppStateStatus);
 
     useEffect(() => {
         getCurrentUser();
+        const sub = AppState.addEventListener('change', _handleAppStateChange);
+        return () => {
+            // برخی نسخه‌ها remove() دارند، برخی removeEventListener — سازگارانه حذف می‌کنیم:
+            try {
+                (sub as any).remove?.();
+            } catch (e) {
+                // fallback: nothing
+            }
+        };
     }, []);
 
+    // هر بار user تغییر کرد مخاطبین دستگاه را بررسی کن (برای جلوگیری از race)
+    useEffect(() => {
+        if (currentUser) {
+            checkDeviceContacts();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentUser]);
+
+    const _handleAppStateChange = (nextAppState: AppStateStatus) => {
+        if (appStateRef.current.match(/inactive|background/) && nextAppState === 'active') {
+            // اپ در foreground برگشته -> چک مخاطبین دوباره
+            checkDeviceContacts();
+        }
+        appStateRef.current = nextAppState;
+    };
+
     const getCurrentUser = async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        setCurrentUser(user);
+        const { data } = await supabase.auth.getUser();
+        setCurrentUser(data?.user ?? null);
+    };
+
+    // بررسی مخاطبین دستگاه و یافتن اکانت‌های ثبت‌شده
+    const checkDeviceContacts = async () => {
+        try {
+            // بررسی و درخواست مجوز با fallback برای حالت‌های مختلف API
+            let permissionGranted = false;
+
+            if (Platform.OS === 'android') {
+                // اگر expo-contacts متد requestPermissionsAsync دارد از آن استفاده کن، در غیر اینصورت از PermissionsAndroid
+                if (typeof Contacts.requestPermissionsAsync === 'function') {
+                    const { status } = await Contacts.requestPermissionsAsync();
+                    permissionGranted = status === 'granted';
+                } else {
+                    const status = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_CONTACTS);
+                    permissionGranted = status === PermissionsAndroid.RESULTS.GRANTED;
+                }
+            } else {
+                // iOS: ابتدا تلاش کن getPermissionsAsync سپس در صورت نیاز requestPermissionsAsync
+                if (typeof Contacts.getPermissionsAsync === 'function') {
+                    const perm = await Contacts.getPermissionsAsync();
+                    if (perm.status === 'granted') permissionGranted = true;
+                    else if (typeof Contacts.requestPermissionsAsync === 'function') {
+                        const req = await Contacts.requestPermissionsAsync();
+                        permissionGranted = req.status === 'granted';
+                    }
+                } else if (typeof Contacts.requestPermissionsAsync === 'function') {
+                    const req = await Contacts.requestPermissionsAsync();
+                    permissionGranted = req.status === 'granted';
+                }
+            }
+
+            if (!permissionGranted) {
+                // کاربر مجوز را نپذیرفته — خاموش کن یا اطلاع بده
+                return;
+            }
+
+            const { data } = await Contacts.getContactsAsync({
+                fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Name],
+            });
+
+            if (!data || data.length === 0) return;
+
+            const digitsSet = new Set<string>();
+            for (const c of data) {
+                if (!c.phoneNumbers) continue;
+                for (const pn of c.phoneNumbers) {
+                    const raw = pn.number || '';
+                    const digits = raw.replace(/\D/g, '');
+                    if (!digits) continue;
+                    digitsSet.add(digits);
+                    // اگر طول بیشتر از 10 است، ورژن آخر 10 رقم را هم اضافه کن (برای شماره‌های محلی)
+                    if (digits.length > 10) {
+                        digitsSet.add(digits.slice(-10));
+                    }
+                }
+            }
+
+            const uniqueDigits = Array.from(digitsSet);
+            if (uniqueDigits.length === 0) {
+                setDeviceMatches([]);
+                return;
+            }
+
+            // گرفتن پروفایل‌هایی که phone_digits یکی از مقادیر ماست
+            const { data: found, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .in('phone_digits', uniqueDigits)
+                .neq('id', currentUser?.id)
+                .limit(200);
+
+            if (error) {
+                console.warn('checkDeviceContacts supabase error', error);
+                return;
+            }
+
+            setDeviceMatches(found || []);
+        } catch (e) {
+            console.warn('checkDeviceContacts error', e);
+        }
     };
 
     const searchUsers = async () => {
@@ -48,13 +162,17 @@ export default function ContactsScreen() {
         try {
             setSearching(true);
 
-            const query = searchQuery.trim().toLowerCase();
+            const query = searchQuery.trim();
+            const queryDigits = query.replace(/\D/g, '');
             const searchPattern = `%${query}%`;
+
+            // جستجو در full_name، username، phone و phone_digits (برای پشتیبانی از فرمت‌های مختلف شماره)
+            const orFilter = `full_name.ilike.%${query}%,username.ilike.%${query}%,phone.ilike.%${query}%,phone_digits.ilike.%${queryDigits}%`;
 
             const { data, error } = await supabase
                 .from('profiles')
                 .select('*')
-                .or(`full_name.ilike.% ${query} %, username.ilike.${searchPattern},username.ilike.${searchPattern}`)
+                .or(orFilter)
                 .neq('id', currentUser?.id)
                 .order('full_name', { ascending: true })
                 .limit(50);
@@ -98,7 +216,7 @@ export default function ContactsScreen() {
                         chat_room_id: roomId,
                         sender_id: 'system',
                         receiver_id: profile.id,
-                        content: ` چت با ${profile.full_name || 'کاربر'} شروع شد`,
+                        content: `چت با ${profile.full_name || 'کاربر'} شروع شد`,
                         message_type: 'system'
                     }
                 ]);
@@ -134,7 +252,15 @@ export default function ContactsScreen() {
     const getInitials = (name: string | null) => {
         if (!name) return 'U';
         return name.split(' ').map(word => word.charAt(0)).join('').toUpperCase().substring(0, 2);
-    }; return (
+    };
+
+    // ترکیب نتایج: ابتدا مخاطبین دستگاه (ثابت) سپس نتایج جستجو بدون تکرار
+    const combinedResults = [
+        ...deviceMatches,
+        ...profiles.filter(p => !deviceMatches.find(dm => dm.id === p.id))
+    ];
+
+    return (
         <View style={styles.container}>
             <View style={styles.header}>
                 <Text style={styles.title}>🔍 جستجوی کاربران</Text>
@@ -145,7 +271,7 @@ export default function ContactsScreen() {
                 <View style={[styles.searchInputContainer, searchFocused && styles.searchInputFocused]}>
                     <TextInput
                         style={styles.searchInput}
-                        placeholder="جستجو با نام، نام کاربری "
+                        placeholder="جستجو با نام، نام کاربری یا شماره"
                         placeholderTextColor="#999"
                         value={searchQuery}
                         onChangeText={setSearchQuery}
@@ -183,7 +309,7 @@ export default function ContactsScreen() {
             )}
 
             <FlatList
-                data={profiles}
+                data={combinedResults}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
                     <TouchableOpacity
@@ -222,12 +348,12 @@ export default function ContactsScreen() {
                         <Text style={styles.emptyText}>
                             {searchQuery && !searching ?
                                 'کاربری با این مشخصات یافت نشد'
-                                : 'برای شروع جستجو، نام یا نام کاربری را وارد کنید'
+                                : 'برای شروع جستجو، نام یا نام کاربری یا شماره را وارد کنید'
                             }
                         </Text>
                         {!searchQuery && (
                             <Text style={styles.emptySubText}>
-                                می‌توانید با نام، نام کاربری یا شماره تلفن جستجو کنید
+                                می‌توانید با نام، نام کاربری یا شماره تلفن جستجو کنید. مخاطبین دستگاه نیز بالاتر نمایش داده می‌شوند.
                             </Text>
                         )}
                     </View>
@@ -237,6 +363,7 @@ export default function ContactsScreen() {
         </View>
     );
 }
+
 const styles = StyleSheet.create({
     container: {
         flex: 1,
@@ -266,7 +393,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff',
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12
     },
     searchInputContainer: {
         flex: 1,
@@ -318,7 +444,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         padding: 16,
-        gap: 8
     },
     loadingText: {
         fontSize: 14,

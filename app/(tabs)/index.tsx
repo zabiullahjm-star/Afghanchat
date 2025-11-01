@@ -10,11 +10,14 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
+import * as SecureStore from 'expo-secure-store'; // <-- added
 
 type ChatRoom = {
   id: string;
   last_message: string;
   last_message_at: string;
+  last_message_sender_id?: string;
+  last_message_type?: string; // 'text' | 'voice' | ...
   other_user_id: string;
   other_user_name: string;
 };
@@ -31,6 +34,34 @@ export default function ChatListScreen() {
   // کانال ریالتایم نگه داشته میشه تا cleanup درست باشه
   const realtimeChannelRef = useRef<any>(null);
 
+  const CACHE_PREFIX = 'afghanchat:';
+
+  // load cached chatRooms سریعاً برای نمایش قبل از fetch از سرور
+  const loadCachedChatRooms = async (userId: string | undefined) => {
+    if (!userId) return;
+    try {
+      const raw = await SecureStore.getItemAsync(CACHE_PREFIX + 'chatrooms:' + userId);
+      if (raw) {
+        const parsed = JSON.parse(raw) as ChatRoom[];
+        if (parsed && parsed.length > 0) {
+          setChatRooms(parsed);
+          setLoadingInitial(false);
+        }
+      }
+    } catch (e) {
+      console.warn('loadCachedChatRooms error', e);
+    }
+  };
+
+  const saveCachedChatRooms = async (userId: string | undefined, rooms: ChatRoom[]) => {
+    if (!userId) return;
+    try {
+      await SecureStore.setItemAsync(CACHE_PREFIX + 'chatrooms:' + userId, JSON.stringify(rooms));
+    } catch (e) {
+      console.warn('saveCachedChatRooms error', e);
+    }
+  };
+
   // گرفتن کاربر فعلی
   useEffect(() => {
     const getUser = async () => {
@@ -44,6 +75,17 @@ export default function ChatListScreen() {
     };
     getUser();
   }, []);
+
+  // وقتی currentUser آماده شد ابتدا cache را لود کن سپس fetch نهایی را بزن
+  useEffect(() => {
+    if (!currentUser || !currentUser.id) return;
+    // اول سعی کن از cache سریع نمایش بدی
+    loadCachedChatRooms(currentUser.id).then(() => {
+      // بعد از نمایش cache، fetch واقعی را انجام بده
+      fetchChatRooms();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser]);
 
   // تابعی که پیام‌ها را از جدول می‌گیرد و chatRooms را می‌سازد
   const fetchChatRooms = async () => {
@@ -78,6 +120,8 @@ export default function ChatListScreen() {
             id: roomId,
             last_message: message.content,
             last_message_at: message.created_at,
+            last_message_sender_id: message.sender_id,
+            last_message_type: message.message_type ?? 'text',
             other_user_id: otherId,
             other_user_name: 'کاربر' // مقدار موقت، بعدا از profiles خوانده می‌شود
           };
@@ -117,6 +161,8 @@ export default function ChatListScreen() {
       roomsFinal.sort((a, b) => (new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()));
 
       setChatRooms(roomsFinal);
+      // ذخیره در کش برای دفعات بعد
+      saveCachedChatRooms(currentUser.id, roomsFinal);
     } catch (err) {
       console.error('fetchChatRooms general error', err);
     } finally {
@@ -139,6 +185,8 @@ export default function ChatListScreen() {
         id: roomId,
         last_message: newMsg.content,
         last_message_at: newMsg.created_at,
+        last_message_sender_id: newMsg.sender_id,
+        last_message_type: newMsg.message_type ?? 'text',
         other_user_id: otherId,
         other_user_name: otherName
       };
@@ -154,7 +202,7 @@ export default function ChatListScreen() {
       }
     });
 
-    // اگر username کش نشده بود، تلاش کن آن را بگیری (غیرفعال بودن backticks رعایت شده)
+    // اگر username کش نشده بود، تلاش کن آن را بگیری
     const parts = roomId.replace('room_', '').split('_');
     const otherId = parts.find((id: string) => id !== currentUser.id) || '';
     if (otherId && !usernameCacheRef.current[otherId]) {
@@ -187,7 +235,7 @@ export default function ChatListScreen() {
     // ساخت filter به صورت رشته (بدون backtick)
     const filterStr = 'or(sender_id.eq.' + currentUser.id + ',receiver_id.eq.' + currentUser.id + ')';
 
-    // ساخت کانال
+    // ساخت کانال و گوش دادن به INSERT و UPDATE (تا پیام‌های جدید و ویرایش‌ها را بگیریم)
     const channel = supabase
       .channel('public:messages')
       .on('postgres_changes', {
@@ -196,7 +244,14 @@ export default function ChatListScreen() {
         table: 'messages',
         filter: filterStr
       }, (payload: any) => {
-        // payload.new شامل ردیف جدیده
+        handleNewMessage(payload.new);
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+        filter: filterStr
+      }, (payload: any) => {
         handleNewMessage(payload.new);
       })
       .subscribe();
@@ -256,7 +311,10 @@ export default function ChatListScreen() {
             <View style={styles.chatInfo}>
               <Text style={styles.userName}>{item.other_user_name}</Text>
               <Text style={styles.lastMessage} numberOfLines={1}>
-                {item.last_message}
+                {/* اگر آخرین پیام از خود کاربر بوده، پیشوند 'شما:' نشان بده */}
+                {item.last_message_type === 'voice'
+                  ? '🔊 ویس'
+                  : (item.last_message_sender_id === currentUser.id ? 'شما: ' : '') + item.last_message}
               </Text>
             </View>
 

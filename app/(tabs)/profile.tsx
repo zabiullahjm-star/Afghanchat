@@ -10,13 +10,12 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
-import { Profile } from '../../types/chat';
 import { User } from '@supabase/supabase-js';
 
 export default function ProfileScreen() {
     const router = useRouter();
     const [user, setUser] = useState<User | null>(null);
-    const [profile, setProfile] = useState<Profile | null>(null);
+    const [profile, setProfile] = useState<any | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -142,7 +141,7 @@ export default function ProfileScreen() {
                     </Text>
                 </View>
 
-                // در بخش اطلاعات حساب، شماره تلفن رو نشون بده
+                {/* در بخش اطلاعات حساب، شماره تلفن رو نشون بده */}
                 <View style={styles.infoItem}>
                     <Text style={styles.infoLabel}>شماره تلفن:</Text>
                     <Text style={styles.infoValue}>
@@ -172,8 +171,6 @@ export default function ProfileScreen() {
         </ScrollView>
     );
 }
-
-// استایل‌ها همون قبلی...</View>
 
 const styles = StyleSheet.create({
     container: {

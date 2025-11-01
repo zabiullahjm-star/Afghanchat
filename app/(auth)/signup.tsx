@@ -37,8 +37,8 @@ export default function SignUpScreen() {
             return;
         }
 
-        if (!formData.password) {
-            Alert.alert('خطا', 'لطفا رمز عبور خود را وارد کنید');
+        if (!formData.phone.trim()) {
+            Alert.alert('خطا', 'لطفا شماره موبایل خود را وارد کنید');
             return;
         }
 
@@ -54,6 +54,8 @@ export default function SignUpScreen() {
 
         try {
             setLoading(true);
+
+            const normalizedPhoneDigits = formData.phone.replace(/\D/g, ''); // فقط ارقام برای جستجو
 
             const { data, error } = await supabase.auth.signUp({
                 email: formData.email.toLowerCase().trim(),
@@ -71,12 +73,29 @@ export default function SignUpScreen() {
             }
 
             if (data.user) {
+                // ایجاد یا بروزرسانی پروفایل در جدول profiles با فیلد phone_digits برای جستجوی راحت
+                try {
+                    const upsertData = {
+                        id: data.user.id,
+                        full_name: formData.fullName.trim(),
+                        phone: formData.phone.trim(),
+                        phone_digits: normalizedPhoneDigits,
+                        // username می‌تواند بعدا تنظیم شود
+                    };
+                    const { error: upsertErr } = await supabase.from('profiles').upsert([upsertData]);
+                    if (upsertErr) {
+                        console.warn('profiles upsert error', upsertErr);
+                    }
+                } catch (e) {
+                    console.warn('upsert profile error', e);
+                }
+
                 Alert.alert(
                     'ثبت‌نام موفق',
-                    'حساب کاربری شما با موفقیت ایجاد شد. لطفا ایمیل خود را برای تأیید حساب بررسی کنید.',
+                    'حساب کاربری شما با موفقیت ایجاد شد. لطفا ایمیل خود را برای تأیید حساب بررسی کنید. در صورت نیاز به ورود، می‌توانید به صفحه ورود بروید.',
                     [
                         {
-                            text: 'ورود به حساب',
+                            text: 'باشه',
                             onPress: () => router.push('/login' as any)
                         }
                     ]
@@ -145,17 +164,33 @@ export default function SignUpScreen() {
                             autoCapitalize="none"
                             autoCorrect={false}
                         />
-                    </View><View style={styles.inputContainer}>
+                    </View>
+                    <View style={styles.inputContainer}>
                         <Text style={styles.inputLabel}>تکرار رمز عبور</Text>
                         <TextInput
                             style={styles.input}
-                            placeholder=".رمز عبور را مجدداً وارد کنید"
+                            placeholder="رمز عبور را مجدداً وارد کنید"
                             value={formData.confirmPassword}
                             onChangeText={(text) => updateFormData('confirmPassword', text)}
                             secureTextEntry
                             autoCapitalize="none"
                             autoCorrect={false}
                         />
+                    </View>
+
+                    {/* جدید: شماره موبایل */}
+                    <View style={styles.inputContainer}>
+                        <Text style={styles.inputLabel}>شماره موبایل</Text>
+                        <TextInput
+                            style={styles.input}
+                            placeholder="+98 912 345 6789 یا 09123456789"
+                            value={formData.phone}
+                            onChangeText={(text) => updateFormData('phone', text)}
+                            keyboardType="phone-pad"
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                        />
+                        <Text style={styles.helperText}>شماره برای جستجو و شناسایی مخاطبین ذخیره می‌شود</Text>
                     </View>
 
                     <TouchableOpacity
