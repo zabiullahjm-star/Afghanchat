@@ -9,559 +9,852 @@ import {
     KeyboardAvoidingView,
     Platform,
     ActivityIndicator,
-    Alert
+    Alert,
+    StatusBar
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
-import type { User } from '@supabase/supabase-js';
-import { Audio } from 'expo-av'
+import { User } from '@supabase/supabase-js';
+import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system';
 
-type Message = {
+// انواع TypeScript
+interface Message {
     id: string;
     content: string;
     sender_id: string;
     created_at: string;
     read: boolean;
-    message_type?: 'text' | 'audio';
+    message_type: 'text' | 'audio';
     audio_url?: string;
-};
+}
 
-export default function ChatScreen() {
+interface Profile {
+    id: string;
+    full_name: string;
+    username: string;
+    avatar_url: string;
+}
+
+// تنظیمات ثابت
+const BUCKET_NAME = 'VOICE_MESSAGES';
+const VOICE_MAX_DURATION = 60000; // 60 ثانیه
+
+export default function ChatRoom() {
     const { roomId, otherUserName } = useLocalSearchParams();
-    const roomIdString = Array.isArray(roomId) ? roomId[0] : roomId;
     const router = useRouter();
 
+    // حالت‌ها
     const [messages, setMessages] = useState<Message[]>([]);
     const [newMessage, setNewMessage] = useState('');
     const [loading, setLoading] = useState(false);
-    const [fetching, setFetching] = useState(true);
     const [currentUser, setCurrentUser] = useState<User | null>(null);
-    const [otherUserId, setOtherUserId] = useState<string>('');
-    // recording states
     const [recording, setRecording] = useState<Audio.Recording | null>(null);
     const [isRecording, setIsRecording] = useState(false);
+    const [recordingDuration, setRecordingDuration] = useState(0);
+    const [playingAudio, setPlayingAudio] = useState<string | null>(null);
+    // بعد از stateهای موجود، این خط رو اضافه کن:
+    const [isCanceling, setIsCanceling] = useState(false);
 
-    const flatListRef = useRef<FlatList<any> | null>(null);
-    const intervalRef = useRef<number | null>(null);
+    // ref ها
+    const flatListRef = useRef<FlatList>(null);
+    const recordingTimerRef = useRef<number | null>(null);
+    const soundRef = useRef<Audio.Sound | null>(null);
 
-    // دریافت user و otherUserId (ترتیب درست)
-    const getCurrentUser = async () => {
-        try {
-            const resp = await supabase.auth.getUser();
-            const user = resp?.data?.user ?? null;
-            setCurrentUser(user);
-            if (user && roomIdString) {
-                const parts = roomIdString.replace('room_', '').split('_');
-                const other = parts.find(id => id !== user.id) ?? '';
-                setOtherUserId(other);
-            }
-        } catch (err) {
-            console.error('getCurrentUser error', err);
-            setCurrentUser(null);
-        }
-    };
-
-    // init: اول کاربر، بعد پیام‌ها
+    // مقداردهی اولیه چت
     useEffect(() => {
-        let mounted = true;
-        const init = async () => {
-            await getCurrentUser();
-            if (!mounted) return;
-            await fetchMessages();
-            // start polling
-            if (intervalRef.current == null) {
-                const id = setInterval(() => {
-                    checkForNewMessages();
-                }, 3000);
-                // @ts-ignore node timer id type
-                intervalRef.current = id;
-            }
-        };
-        init();
+        initializeChat();
         return () => {
-            mounted = false;
-            if (intervalRef.current != null) {
-                clearInterval(intervalRef.current as unknown as number);
-                intervalRef.current = null;
+            // پاکسازی
+            if (recordingTimerRef.current) {
+                clearInterval(recordingTimerRef.current);
             }
+            if (soundRef.current) {
+                soundRef.current.unloadAsync();
+            }
+            supabase.removeAllChannels();
         };
-        // roomIdString در dependency تا وقتی روم تغییر کنه init دوباره اجرا شه
-    }, [roomIdString]);
+    }, [roomId]);
 
-    // fetch اولیه پیامها (کل تاریخچه)
-    const fetchMessages = async () => {
-        if (!roomIdString) return;
+    const initializeChat = async () => {
         try {
-            setFetching(true);
-            const q = supabase
-                .from('messages')
-                .select('*')
-                .eq('chat_room_id', roomIdString)
-                .order('created_at', { ascending: true });
-            const { data, error } = await q;
-            if (error) {
-                console.error('fetchMessages error', error);
+            setLoading(true);
+
+            // دریافت کاربر فعلی
+            const { data: { user } } = await supabase.auth.getUser();
+            setCurrentUser(user);
+
+            if (!user) {
+                router.replace('/(auth)/login');
                 return;
             }
-            if (data) {
-                // جایگزین کامل برای وضعیت اولیه
-                setMessages(data as Message[]);
-                // scroll to end after a small delay
-                setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-            }
-        } catch (err) {
-            console.error('fetchMessages unexpected', err);
+
+            // دریافت پیام‌های قبلی
+            await fetchMessages();
+
+            // گوش دادن به پیام‌های جدید
+            subscribeToMessages();
+
+        } catch (error) {
+            console.error('خطا در راه‌اندازی چت:', error);
+            Alert.alert('خطا', 'مشکلی در راه‌اندازی چت پیش آمد');
         } finally {
-            setFetching(false);
+            setLoading(false);
         }
     };
 
-    // check فقط پیامهای جدیدتر از آخرین پیام محلی را می‌گیرد (اجتناب از overwrite)
-    const checkForNewMessages = async () => {
-        if (!roomIdString) return;
+    // دریافت پیام‌ها از دیتابیس
+    const fetchMessages = async () => {
         try {
-            const last = messages.length > 0 ? messages[messages.length - 1].created_at : null;
-            let query = supabase
+            const { data, error } = await supabase
                 .from('messages')
                 .select('*')
-                .eq('chat_room_id', roomIdString)
+                .eq('chat_room_id', roomId)
                 .order('created_at', { ascending: true });
-            if (last) {
-                // استفاده از gt با رشته تاریخ (بدون backtick)
-                query = (query as any).gt('created_at', last);
-            }
-            const { data, error } = await query;
-            if (error) {
-                console.error('checkForNewMessages error', error);
-                return;
-            }
-            if (data && data.length > 0) {
-                // فقط پیام‌های جدیدی که id شون در state نیست اضافه می‌کنیم
-                setMessages(prev => {
-                    const existing = new Set(prev.map(m => m.id));
-                    const newMsgs = (data as Message[]).filter(m => !existing.has(m.id));
-                    if (newMsgs.length === 0) return prev;
-                    const merged = [...prev, ...newMsgs];
-                    // اسکرول به پایین
-                    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-                    return merged;
-                });
-            }
-        } catch (err) {
-            console.error('checkForNewMessages unexpected', err);
+
+            if (error) throw error;
+            if (data) setMessages(data as Message[]);
+
+        } catch (error) {
+            console.error('خطا در دریافت پیام‌ها:', error);
+            Alert.alert('خطا', 'مشکلی در دریافت پیام‌ها پیش آمد');
         }
     };
 
-    // ارسال پیام: temp message اضافه میشه، سپس با پیام واقعی جایگزین میشه
-    const sendMessage = async () => {
-        if (!newMessage.trim() || !currentUser) return;
-        const tempId = 'temp' + Date.now();
-        const temp: Message = {
-            id: tempId,
+    // گوش دادن به پیام‌های جدید
+    const subscribeToMessages = () => {
+        const subscription = supabase
+            .channel(`room: ${ roomId }`)
+            .on('postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'messages', filter: `chat_room_id = eq.${ roomId }`
+                },
+    (payload) => {
+        const newMessage = payload.new as Message;
+        setMessages(prev => {
+            // جلوگیری از duplicate
+            if (prev.some(msg => msg.id === newMessage.id)) {
+                return prev;
+            }
+            return [...prev, newMessage];
+        });
+
+        // اسکرول به پایین
+        setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+    }
+            )
+            .subscribe();
+
+    return () => {
+        subscription.unsubscribe();
+    };
+};
+
+// ارسال پیام متنی
+const sendMessage = async () => {
+    if (!newMessage.trim() || !currentUser) return;
+
+    const tempId = `temp - ${ Date.now()
+}`;
+const tempMessage: Message = {
+    id: tempId,
+    content: newMessage.trim(),
+    sender_id: currentUser.id,
+    created_at: new Date().toISOString(),
+    read: false,
+    message_type: 'text'
+};
+
+// اضافه کردن پیام موقت
+setMessages(prev => [...prev, tempMessage]);
+setNewMessage('');
+scrollToBottom();
+
+try {
+    // ارسال به دیتابیس
+    const { data, error } = await supabase
+        .from('messages')
+        .insert([{
             content: newMessage.trim(),
             sender_id: currentUser.id,
-            created_at: new Date().toISOString(),
-            read: false
-        };
-
-        setMessages(prev => [...prev, temp]);
-        setNewMessage('');
-        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-
-        const payload = {
-            content: temp.content,
-            sender_id: currentUser.id,
-            receiver_id: otherUserId,
-            chat_room_id: roomIdString,
+            chat_room_id: roomId,
             message_type: 'text',
             read: false
-        };
+        }])
+        .select();
 
-        try {
-            setLoading(true);
-            const { data, error } = await supabase.from('messages').insert([payload]).select();
-            if (error) {
-                console.error('sendMessage error', error);
-                // حذف پیام موقت
-                setMessages(prev => prev.filter(m => m.id !== tempId));
-                Alert.alert('خطا', 'ارسال پیام موفق نبود');
-                return;
-            }
-            if (data && data[0]) {
-                const real = data[0] as Message;
-                setMessages(prev => prev.map(m => (m.id === tempId ? real : m)));
-            }
-        } catch (err) {
-            console.error('sendMessage unexpected', err);
-            setMessages(prev => prev.filter(m => m.id !== tempId));
-            Alert.alert('خطا', 'ارسال پیام خطا داد');
-        } finally {
-            setLoading(false);
-        }
-    };
-    const startRecording = async () => {
-        try {
-            const { granted } = await Audio.requestPermissionsAsync();
-            if (!granted) {
-                Alert.alert('اجازه میکروفون لازم است');
-                return;
-            }
+    if (error) throw error;
 
-            await Audio.setAudioModeAsync({
-                allowsRecordingIOS: true,
-                playsInSilentModeIOS: true,
-            });
-
-            const { recording } = await Audio.Recording.createAsync(
-                Audio.RecordingOptionsPresets.HIGH_QUALITY
-            );
-            setRecording(recording);
-            setIsRecording(true);
-        } catch (err) {
-            console.error('startRecording error', err);
-            Alert.alert('خطا', 'شروع ضبط ممکن نیست');
-        }
-    };
-
-    const stopRecording = async () => {
-        try {
-            if (!recording) return;
-            await recording.stopAndUnloadAsync();
-            const uri = recording.getURI();
-            setIsRecording(false);
-            setRecording(null);
-
-            if (uri) {
-                // آپلود و ارسال ویس
-                await uploadVoiceToSupabase(uri);
-            }
-        } catch (err) {
-            console.error('stopRecording error', err);
-            Alert.alert('خطا', 'متوقف کردن ضبط با مشکل مواجه شد');
-        }
-    };
-    const uploadVoiceToSupabase = async (localUri: string) => {
-        try {
-            setLoading(true);
-            // نام فایل در باکت
-            const fileExt = localUri.split('.').pop() ?? 'm4a';
-            const fileName = `voice_${Date.now()
-                }.${fileExt}`;
-
-            const response = await fetch(localUri);
-            const blob = await response.blob();
-
-            // آپلود به باکت voice-messages (مطابق با نام باکت تو عوض کن)
-            const { data: uploadData, error: uploadError } = await supabase
-                .storage
-                .from('voice-messages')
-                .upload(fileName, blob, { contentType: 'audio/m4a' });
-
-            if (uploadError) {
-                throw uploadError;
-            }
-
-            // گرفتن public url (یا path بسته به نیاز)
-            const { data: publicData } = supabase
-                .storage
-                .from('voice-messages')
-                .getPublicUrl(fileName);
-
-            const publicUrl = publicData?.publicUrl ?? uploadData?.path ?? null;
-            if (!publicUrl) throw new Error('publicUrl not available');
-
-            // ساخت payload پیام صوتی و ذخیره در جدول messages
-            const payload = {
-                sender_id: currentUser?.id,
-                receiver_id: otherUserId,
-                chat_room_id: roomIdString,
-                message_type: 'audio',
-                audio_url: publicUrl,
-                content: '',
-                read: false,
-            };
-
-            const { data, error } = await supabase.from('messages').insert([payload]).select();
-            if (error) throw error;
-
-            if (data && data[0]) {
-                // اگر دوست داری پیام جدید را بلافاصله به state اضافه کن
-                setMessages(prev => [...prev, data[0] as Message]);
-                setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-            }
-        } catch (err) {
-            console.error('uploadVoiceToSupabase error', err);
-            Alert.alert('خطا', 'آپلود ویس موفق نبود');
-        } finally {
-            setLoading(false);
-        }
-    };
-    const sendVoiceMessage = async (uri: string) => {
-        if (!currentUser || !otherUserId || !roomIdString) return;
-
-        const tempId = 'temp_audio_' + Date.now();
-        const temp: Message = {
-            id: tempId,
-            content: '',
-            sender_id: currentUser.id,
-            created_at: new Date().toISOString(),
-            read: false,
-            message_type: 'audio',
-            audio_url: uri
-        };
-
-        setMessages(prev => [...prev, temp]);
-        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-
-        try {
-            setLoading(true);
-            const fileName = `voice_${Date.now()
-                }.mp3`;
-            const { data: uploadData, error: uploadError } = await supabase
-                .storage
-                .from('voice_messages')
-                .upload(fileName, await fetch(uri).then(r => r.blob()), { upsert: true });
-
-            if (uploadError) throw uploadError;
-
-            const { data, error } = await supabase.from('messages').insert([{
-                sender_id: currentUser.id,
-                receiver_id: otherUserId,
-                chat_room_id: roomIdString,
-                message_type: 'audio',
-                audio_url: uploadData.path,
-                read: false
-            }]).select();
-
-            if (error) throw error;
-            if (data && data[0]) setMessages(prev => prev.map(m => m.id === tempId ? data[0] : m));
-        } catch (err) {
-            console.error('sendVoiceMessage', err);
-            setMessages(prev => prev.filter(m => m.id !== tempId));
-            Alert.alert('خطا', 'ارسال ویس موفق نبود');
-        } finally {
-            setLoading(false);
-        }
-    };
-    const playAudio = async (url: string) => {
-        try {
-            // اگر url مسیر publicUrl باشه همین رو پاس بده
-            const { sound } = await Audio.Sound.createAsync({ uri: url });
-            await sound.playAsync();
-
-            sound.setOnPlaybackStatusUpdate((status) => {
-                if (status.isLoaded && status.didJustFinish) {
-                    sound.unloadAsync();
-                }
-            });
-        } catch (err) {
-            console.error('playAudio error', err);
-            Alert.alert('خطا', 'پخش ویس ممکن نیست');
-        }
-    };
-    const renderMessage = ({ item }: { item: Message }) => {
-        const isMine = item.sender_id === currentUser?.id;
-        const isTemp =
-            typeof item.id === 'string' && item.id.startsWith('temp');
-
-        return (
-            <View
-                style={[
-                    styles.messageRow,
-                    isMine ? styles.myMessageRow : styles.otherMessageRow,
-                ]}
-            >
-                <View
-                    style={[
-                        styles.messageBubble,
-                        item.message_type === 'audio'
-                            ? styles.voiceBubble
-                            : isMine
-                                ? styles.myBubble
-                                : styles.otherBubble,
-                        isTemp && styles.tempMessage,
-                    ]}
-                >
-                    {item.message_type === 'audio' ? (
-                        <TouchableOpacity onPress={() => playAudio(item.audio_url!)}>
-                            <Text style={{ color: 'white', fontSize: 16 }}>
-                                🔊 پخش صدا
-                            </Text>
-                        </TouchableOpacity>
-                    ) : (
-                        <Text
-                            style={[
-                                styles.messageText,
-                                isMine ? styles.myMessageText : styles.otherMessageText,
-                            ]}
-                        >
-                            {item.content}
-                            {isTemp ? ' ...' : ''}
-                        </Text>
-                    )}
-
-                    <Text
-                        style={[
-                            styles.messageTime,
-                            isMine ? styles.myMessageTime : styles.otherMessageTime,
-                        ]}
-                    >
-                        {new Date(item.created_at).toLocaleTimeString('fa-IR', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                        })}
-                    </Text>
-                </View>
-            </View>
-        );
-    };
-
-    if (fetching) {
-        return (
-            <View style={styles.center}>
-                <ActivityIndicator size="large" color="#007AFF" />
-                <Text style={styles.loadingText}>در حال بارگذاری پیام‌ها...</Text>
-            </View>
+    // جایگزینی پیام موقت
+    if (data && data[0]) {
+        setMessages(prev =>
+            prev.map(msg => msg.id === tempId ? data[0] : msg)
         );
     }
 
-    return (
-        <KeyboardAvoidingView
-            style={styles.container}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 150 : 80}
-        >
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                    <Text style={styles.backButtonText}>←</Text>
-                </TouchableOpacity>
+} catch (error) {
+    console.error('خطا در ارسال پیام:', error);
+    // حذف پیام موقت
+    setMessages(prev => prev.filter(msg => msg.id !== tempId));
+    Alert.alert('خطا', 'ارسال پیام موفقیت‌آمیز نبود');
+}
+    };
 
-                <View style={styles.headerInfo}>
-                    <Text style={styles.headerTitle}>{otherUserName ?? 'چت'}</Text>
-                    <Text style={styles.headerSubtitle}>{messages.length > 0 ? messages.length + ' پیام' : 'شروع گفتگو'}</Text>
-                </View>
+// شروع ضبط صدا
+const startRecording = async () => {
+    try {
+        // درخواست مجوزها
+        const { status } = await Audio.requestPermissionsAsync();
+        if (status !== 'granted') {
+            Alert.alert('مجوز لازم', 'برای ضبط صدا نیاز به دسترسی میکروفون دارید');
+            return;
+        }
 
-                <View style={styles.headerPlaceholder} />
-            </View><FlatList
-                ref={flatListRef}
-                data={messages}
-                keyExtractor={(item) => item.id}
-                renderItem={renderMessage}
-                style={styles.messagesList}
-                contentContainerStyle={styles.messagesContent}
-                onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-                onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
-                ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <Text style={styles.emptyText}>🎉 گفتگو رو شروع کن!</Text>
-                        <Text style={styles.emptySubText}>اولین پیام رو ارسال کن</Text>
-                    </View>
+        // تنظیم حالت صدا
+        await Audio.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
+            staysActiveInBackground: false,
+            shouldDuckAndroid: true,
+            playThroughEarpieceAndroid: false,
+        });
+
+        // شروع ضبط
+        const { recording } = await Audio.Recording.createAsync(
+            Audio.RecordingOptionsPresets.HIGH_QUALITY
+        );
+
+        setRecording(recording);
+        setIsRecording(true);
+        setRecordingDuration(0);
+
+        // تایمر برای نمایش مدت ضبط
+        recordingTimerRef.current = setInterval(() => {
+            setRecordingDuration(prev => {
+                if (prev >= VOICE_MAX_DURATION / 1000) {
+                    stopRecording();
+                    return prev;
                 }
-                showsVerticalScrollIndicator={false}
-            />
+                return prev + 1;
+            });
+        }, 1000) as unknown as number;
 
-            <View style={styles.inputContainer}>
-                <TextInput
-                    style={styles.textInput}
-                    value={newMessage}
-                    onChangeText={setNewMessage}
-                    placeholder="پیام خود را بنویسید..."
-                    placeholderTextColor="#999"
-                    multiline
-                    maxLength={500}
-                />
+    } catch (error) {
+        console.error('خطا در شروع ضبط:', error);
+        Alert.alert('خطا', 'شروع ضبط ممکن نیست');
+    }
+};
 
-                {/* میکروفون: نگه دار برای ضبط، رها کن برای ارسال */}
-                <TouchableOpacity
-                    style={[styles.micButton, isRecording && { backgroundColor: 'red' }]}
-                    onPressIn={startRecording}
-                    onPressOut={stopRecording}
-                >
-                    <Text style={styles.micButtonText}>{isRecording ? '■' : '🎤'}</Text>
-                </TouchableOpacity>
+// توقف ضبط صدا
+    // تابع stopRecording رو به این صورت تغییر بده:
+    const stopRecording = async (cancel: boolean = false) => {
+        try {
+            if (!recording) return;
 
-                {/* دکمه ارسال متن */}
-                <TouchableOpacity
-                    style={[styles.sendButton, (!newMessage.trim() || loading) && styles.sendButtonDisabled]}
-                    onPress={sendMessage}
-                    disabled={!newMessage.trim() || loading}
-                >
-                    {loading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.sendButtonText}>➤</Text>}
-                </TouchableOpacity>
+            // پاکسازی تایمر
+            if (recordingTimerRef.current) {
+                clearInterval(recordingTimerRef.current);
+                recordingTimerRef.current = null;
+            }
+
+            // توقف ضبط
+            await recording.stopAndUnloadAsync();
+            const uri = recording.getURI();
+
+            setIsRecording(false);
+            setRecording(null);
+            setRecordingDuration(0);
+            setIsCanceling(false);
+
+            // اگر لغو نشده و ضبط موفق بود، آپلود کن
+            if (!cancel && uri && recordingDuration >= 1) {
+                await uploadVoiceMessage(uri);
+            } else if (!cancel && uri) {
+                Alert.alert('ضبط کوتاه', 'پیام صوتی باید حداقل 1 ثانیه باشد');
+            } else if (cancel) {
+                Alert.alert('ضبط لغو شد', 'پیام صوتی ارسال نشد');
+            }
+
+        } catch (error) {
+            console.error('خطا در توقف ضبط:', error);
+            Alert.alert('خطا', 'توقف ضبط با مشکل مواجه شد');
+        }
+    };
+
+// آپلود پیام صوتی
+const uploadVoiceMessage = async (localUri: string) => {
+    try {
+        setLoading(true);
+
+        // ایجاد نام فایل
+        const fileExt = 'm4a';
+        const fileName = `voice_${ Date.now()
+    }.${ fileExt }`;
+
+    // تبدیل به blob
+    const fileInfo = await FileSystem.getInfoAsync(localUri);
+    if (!fileInfo.exists) {
+        throw new Error('فایل ضبط شده یافت نشد');
+    }
+
+    const response = await fetch(localUri);
+    const blob = await response.blob();
+
+    // آپلود به Supabase Storage
+    const { data: uploadData, error: uploadError } = await supabase
+        .storage
+        .from(BUCKET_NAME)
+        .upload(fileName, blob, {
+            contentType: 'audio/m4a',
+            upsert: false
+        });
+
+    if (uploadError) throw uploadError;
+
+    // دریافت لینک عمومی
+    const { data: publicData } = supabase
+        .storage
+        .from(BUCKET_NAME)
+        .getPublicUrl(fileName);
+
+    const publicUrl = publicData.publicUrl;
+
+    // ذخیره در دیتابیس
+    const { data, error } = await supabase
+        .from('messages')
+        .insert([{
+            sender_id: currentUser?.id,
+            chat_room_id: roomId,
+            message_type: 'audio',
+            audio_url: publicUrl,
+            content: 'پیام صوتی',
+            read: false
+        }])
+        .select();
+
+    if (error) throw error;
+
+    // اضافه کردن به لیست پیام‌ها
+    if (data && data[0]) {
+        setMessages(prev => [...prev, data[0] as Message]);
+        scrollToBottom();
+    }
+
+} catch (error) {
+    console.error('خطا در آپلود پیام صوتی:', error);
+    Alert.alert('خطا', 'آپلود پیام صوتی موفقیت‌آمیز نبود');
+} finally {
+    setLoading(false);
+}
+    };
+
+// پخش پیام صوتی
+const playAudio = async (audioUrl: string) => {
+    try {
+        // توقف پخش قبلی
+        if (soundRef.current) {
+            await soundRef.current.stopAsync();
+            await soundRef.current.unloadAsync();
+            soundRef.current = null;
+        }
+
+        setPlayingAudio(audioUrl);
+
+        // ایجاد و پخش صدا
+        const { sound } = await Audio.Sound.createAsync(
+            { uri: audioUrl },
+            { shouldPlay: true }
+        );
+
+        soundRef.current = sound;
+
+        // گوش دادن به وضعیت پخش
+        sound.setOnPlaybackStatusUpdate((status: any) => {
+            if (status.isLoaded && status.didJustFinish) {
+                setPlayingAudio(null);
+                sound.unloadAsync();
+                soundRef.current = null;
+            }
+        });
+
+        await sound.playAsync();
+
+    } catch (error) {
+        console.error('خطا در پخش صدا:', error);
+        Alert.alert('خطا', 'پخش پیام صوتی ممکن نیست');
+        setPlayingAudio(null);
+    }
+};// توقف پخش صدا
+const stopAudio = async () => {
+    if (soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+        setPlayingAudio(null);
+    }
+};
+
+// اسکرول به پایین
+const scrollToBottom = () => {
+    setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+};
+
+// فرمت زمان ضبط
+const formatRecordingTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${ mins }:${ secs.toString().padStart(2, '0') }`;
+};
+
+// رندر هر پیام
+const renderMessage = ({ item }: { item: Message }) => {
+    const isMyMessage = item.sender_id === currentUser?.id;
+    const isAudio = item.message_type === 'audio';
+    const isPlaying = playingAudio === item.audio_url;
+
+    return (
+        <View style={[
+            styles.messageContainer,
+            isMyMessage ? styles.myMessageContainer : styles.otherMessageContainer
+        ]}>
+            <View style={[
+                styles.messageBubble,
+                isMyMessage ? styles.myMessageBubble : styles.otherMessageBubble,
+                isAudio && styles.audioMessageBubble
+            ]}>
+                {isAudio ? (
+                    <TouchableOpacity
+                        style={styles.audioButton}
+                        onPress={() => isPlaying ? stopAudio() : playAudio(item.audio_url!)}
+                        disabled={!item.audio_url}
+                    >
+                        <Text style={styles.audioIcon}>
+                            {isPlaying ? '⏸️' : '🔊'}
+                        </Text>
+                        <View style={styles.audioInfo}>
+                            <Text style={styles.audioText}>
+                                {isPlaying ? 'در حال پخش...' : 'پیام صوتی'}
+                            </Text>
+                            <Text style={styles.audioDuration}>
+                                {isPlaying ? 'کلیک برای توقف' : 'کلیک برای پخش'}
+                            </Text>
+                        </View>
+                    </TouchableOpacity>
+                ) : (
+                    <Text style={[
+                        styles.messageText,
+                        isMyMessage ? styles.myMessageText : styles.otherMessageText
+                    ]}>
+                        {item.content}
+                    </Text>
+                )}
+
+                <Text style={[
+                    styles.messageTime,
+                    isMyMessage ? styles.myMessageTime : styles.otherMessageTime
+                ]}>
+                    {new Date(item.created_at).toLocaleTimeString('fa-IR', {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    })}
+                </Text>
             </View>
-        </KeyboardAvoidingView>
+        </View>
+    );
+};
+
+if (loading && messages.length === 0) {
+    return (
+        <View style={styles.center}>
+            <StatusBar barStyle="dark-content" />
+            <ActivityIndicator size="large" color="#007AFF" />
+            <Text style={styles.loadingText}>در حال بارگذاری چت...</Text>
+        </View>
     );
 }
 
-// کامل و سازگار با نامهای استفاده شده در JSX
-const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f8f9fa' },
-    center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-    loadingText: { marginTop: 8, color: '#666' },
+return (
+    <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
+        <StatusBar barStyle="light-content" />
 
-    header: {
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        backgroundColor: '#007AFF', paddingHorizontal: 12, paddingVertical: 12,
-        borderBottomLeftRadius: 18, borderBottomRightRadius: 18
+        {/* هدر */}<View style={styles.header}>
+            <TouchableOpacity
+                style={styles.backButton}
+                onPress={() => router.back()}
+            >
+                <Text style={styles.backButtonText}>←</Text>
+            </TouchableOpacity>
+
+            <View style={styles.headerInfo}>
+                <Text style={styles.headerTitle}>
+                    {otherUserName || 'چت'}
+                </Text>
+                <Text style={styles.headerSubtitle}>
+                    {messages.length} پیام
+                </Text>
+            </View>
+
+            <View style={styles.headerPlaceholder} />
+        </View>
+
+        {/* لیست پیام‌ها */}
+        <FlatList
+            ref={flatListRef}
+            data={messages}
+            keyExtractor={(item) => item.id}
+            renderItem={renderMessage}
+            style={styles.messagesList}
+            contentContainerStyle={styles.messagesContent}
+            onContentSizeChange={scrollToBottom}
+            onLayout={scrollToBottom}
+            showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+                <View style={styles.emptyContainer}>
+                    <Text style={styles.emptyText}>🎉 گفتگو را شروع کنید!</Text>
+                    <Text style={styles.emptySubText}>
+                        اولین پیام خود را ارسال کنید
+                    </Text>
+                </View>
+            }
+        />
+
+        {/* حالت ضبط صدا */}
+        {isRecording && (
+            <View style={styles.recordingOverlay}>
+                <View style={styles.recordingContainer}>
+                    <Text style={styles.recordingText}>
+                        🔴 در حال ضبط...
+                    </Text>
+                    <Text style={styles.recordingTime}>
+                        {formatRecordingTime(recordingDuration)}
+                    </Text>
+                    <Text style={styles.recordingHint}>
+                        برای ارسال رها کنید، برای لغو بکشید
+                    </Text>
+                </View>
+            </View>
+        )}
+
+        {/* نوار ورود پیام */}
+        <View style={styles.inputContainer}>
+            <TextInput
+                style={styles.textInput}
+                value={newMessage}
+                onChangeText={setNewMessage}
+                placeholder="پیام خود را بنویسید..."
+                placeholderTextColor="#999"
+                multiline
+                maxLength={1000}
+                textAlignVertical="center"
+            />
+
+           // در بخش inputContainer، دکمه ضبط رو به این صورت تغییر بده:
+            <TouchableOpacity
+                style={[
+                    styles.recordButton,
+                    isRecording && styles.recordButtonActive,
+                    isCanceling && styles.recordButtonCanceling
+                ]}
+                onPressIn={startRecording}
+                onPressOut={() => stopRecording(isCanceling)}
+                onLongPress={() => {
+                    // برای تشخیص کشیدن به سمت چپ (لغو)
+                }}
+                disabled={loading}
+            >
+                <Text style={styles.recordButtonText}>
+                    {isCanceling ? '❌' : (isRecording ? '⏹️' : '🎤')}
+                </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+                style={[
+                    styles.sendButton,
+                    (!newMessage.trim() || loading) && styles.sendButtonDisabled
+                ]}
+                onPress={sendMessage}
+                disabled={!newMessage.trim() || loading}
+            >
+                {loading ? (
+                    <ActivityIndicator size="small" color="white" />
+                ) : (
+                    <Text style={styles.sendButtonText}>➤</Text>
+                )}
+            </TouchableOpacity>
+        </View>
+    </KeyboardAvoidingView>
+);
+}const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: '#f8f9fa',
     },
-    backButton: { padding: 6 },
-    backButtonText: { color: 'white', fontSize: 20, fontWeight: '700' },
-    headerInfo: { flex: 1, alignItems: 'center' },
-    headerTitle: { color: 'white', fontSize: 20, fontWeight: '700' },
-    headerSubtitle: { color: 'rgba(255,255,255,0.9)', fontSize: 12, marginTop: 2 },
-    headerPlaceholder: { width: 28 },
-
-    messagesList: { flex: 1, backgroundColor: '#f8f9fa' },
-    messagesContent: { paddingHorizontal: 14, paddingVertical: 10 },
-
-    messageRow: { flexDirection: 'row', marginVertical: 6 },
-    myMessageRow: { justifyContent: 'flex-end' },
-    otherMessageRow: { justifyContent: 'flex-start' },
-
-    messageBubble: { maxWidth: '80%', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18 },
-    myBubble: { backgroundColor: '#007AFF', borderBottomRightRadius: 6 },
-    otherBubble: { backgroundColor: '#2b8a66', borderBottomLeftRadius: 6 },
-
-    tempMessage: { opacity: 0.7 },
-
-    messageText: { fontSize: 16, lineHeight: 22 },
-    myMessageText: { color: 'white' },
-    otherMessageText: { color: 'white' },
-
-    messageTime: { fontSize: 10, marginTop: 6, opacity: 0.85 },
-    myMessageTime: { color: 'rgba(255,255,255,0.85)', textAlign: 'right' },
-    otherMessageTime: { color: 'rgba(255,255,255,0.85)', textAlign: 'left' },
-
-    emptyContainer: { alignItems: 'center', paddingVertical: 40 },
-    emptyText: { fontSize: 18, color: '#666', marginBottom: 6 },
-    emptySubText: { fontSize: 14, color: '#999' },
-
-    inputContainer: { flexDirection: 'row', alignItems: 'flex-end', padding: 10, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e6e6e6' },
-    textInput: { flex: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: '#f0f0f0', fontSize: 16, maxHeight: 120 },
-    sendButton: { marginLeft: 8, backgroundColor: '#007AFF', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-    sendButtonDisabled: { backgroundColor: '#9aa5b1' },
-    sendButtonText: { color: '#fff', fontSize: 18, fontWeight: '700' },
-    micButton: {
-        marginLeft: 8,
-        backgroundColor: '#3aa55d',
+    center: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+    },
+    loadingText: {
+        marginTop: 12,
+        fontSize: 16,
+        color: '#666',
+    },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: '#007AFF',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        paddingTop: Platform.OS === 'ios' ? 60 : 40,
+        borderBottomLeftRadius: 20,
+        borderBottomRightRadius: 20,
+        elevation: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+    },
+    backButton: {
+        padding: 8,
+    },
+    backButtonText: {
+        color: 'white',
+        fontSize: 20,
+        fontWeight: 'bold',
+    },
+    headerInfo: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    headerTitle: {
+        color: 'white',
+        fontSize: 18,
+        fontWeight: 'bold',
+    },
+    headerSubtitle: {
+        color: 'rgba(255,255,255,0.9)',
+        fontSize: 12,
+        marginTop: 2,
+    },
+    headerPlaceholder: {
+        width: 40,
+    },
+    messagesList: {
+        flex: 1,
+    },
+    messagesContent: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+    },
+    messageContainer: {
+        flexDirection: 'row',
+        marginVertical: 4,
+    },
+    myMessageContainer: {
+        justifyContent: 'flex-end',
+    },
+    otherMessageContainer: {
+        justifyContent: 'flex-start',
+    },
+    messageBubble: {
+        maxWidth: '80%',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderRadius: 20,
+        marginVertical: 2,
+    },
+    myMessageBubble: {
+        backgroundColor: '#007AFF',
+        borderBottomRightRadius: 6,
+    },
+    otherMessageBubble: {
+        backgroundColor: 'white',
+        borderBottomLeftRadius: 6,
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+    },
+    audioMessageBubble: {
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+    },
+    messageText: {
+        fontSize: 16,
+        lineHeight: 22,
+    },
+    myMessageText: {
+        color: 'white',
+    },
+    otherMessageText: {
+        color: '#1a1a1a',
+    },
+    messageTime: {
+        fontSize: 10,
+        marginTop: 6,
+        opacity: 0.8,
+    },
+    myMessageTime: {
+        color: 'rgba(255,255,255,0.8)',
+        textAlign: 'right',
+    },
+    otherMessageTime: {
+        color: 'rgba(0,0,0,0.5)',
+        textAlign: 'left',
+    },
+    audioButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        minWidth: 120,
+    },
+    audioIcon: {
+        fontSize: 20,
+        marginRight: 8,
+    },
+    audioInfo: {
+        flex: 1,
+    },
+    audioText: {
+        fontSize: 14,
+        color: 'white',
+        fontWeight: '500',
+    },
+    audioDuration: {
+        fontSize: 10,
+        color: 'rgba(255,255,255,0.7)',
+        marginTop: 2,
+    },
+    emptyContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingVertical: 100,
+    },
+    emptyText: {
+        fontSize: 20,
+        color: '#666',
+        marginBottom: 8,
+        fontWeight: 'bold',
+    },
+    emptySubText: {
+        fontSize: 14,
+        color: '#999',
+        textAlign: 'center',
+    },
+    inputContainer: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        padding: 16,
+        backgroundColor: 'white',
+        borderTopWidth: 1,
+        borderTopColor: '#e9ecef',
+        paddingBottom: Platform.OS === 'ios' ? 25 : 16,
+    },
+    textInput: {
+        flex: 1,
+        borderWidth: 1,
+        borderColor: '#e9ecef',
+        borderRadius: 25,
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        marginRight: 12,
+        maxHeight: 100,
+        backgroundColor: '#f8f9fa',
+        fontSize: 16,
+        textAlign: 'right',
+    },
+    recordButton: {
+        backgroundColor: '#28a745',
         width: 48,
         height: 48,
         borderRadius: 24,
         justifyContent: 'center',
         alignItems: 'center',
+        marginRight: 8,
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
     },
-    micButtonText: {
+    recordButtonActive: {
+        backgroundColor: '#dc3545',
+    },
+    recordButtonCanceling: {
+        backgroundColor: '#ff6b35',
+        transform: [{ scale: 1.1 }]
+    },
+    recordButtonText: {
+        fontSize: 18,
+        color: 'white',
+    },
+    sendButton: {
+        backgroundColor: '#007AFF',
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+    },
+    sendButtonDisabled: {
+        backgroundColor: '#ccc',
+    },
+    sendButtonText: {
         color: 'white',
         fontSize: 18,
+        fontWeight: 'bold',
+        marginLeft: 2,
     },
-    voiceBubble: {
-        backgroundColor: '#4A90E2',
-        paddingVertical: 10,
-        paddingHorizontal: 14,
-        borderRadius: 18,
-        maxWidth: '75%',
-        flexDirection: 'row',
-        alignItems: 'center',
+    recordingOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.7)',
         justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 1000,
+    },
+    recordingContainer: {
+        backgroundColor: 'white',
+        padding: 24,
+        borderRadius: 16,
+        alignItems: 'center',
+        elevation: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+    },
+    recordingText: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#dc3545',
+        marginBottom: 8,
+    },
+    recordingTime: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#333',
+        marginBottom: 8,
+    },
+    recordingHint: {
+        fontSize: 14,
+        color: '#666',
+        textAlign: 'center',
     },
 });
