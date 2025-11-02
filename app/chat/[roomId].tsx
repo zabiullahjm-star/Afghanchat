@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useTheme } from '../../contexts/ThemeContext';
 import {
     View,
     Text,
@@ -16,7 +17,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
 import { User } from '@supabase/supabase-js';
 import { Audio } from 'expo-av';
-import * as SecureStore from 'expo-secure-store'; // <-- added
+import * as SecureStore from 'expo-secure-store';
 
 // انواع TypeScript
 interface Message {
@@ -38,11 +39,16 @@ interface Profile {
 
 // تنظیمات ثابت
 const BUCKET_NAME = 'voice_messages';
-const VOICE_MAX_DURATION = 60000; // 60 ثانیه
+const VOICE_MAX_DURATION = 90000; // 60 ثانیه
 
 export default function ChatRoom() {
     const { roomId, otherUserName } = useLocalSearchParams();
     const router = useRouter();
+    const { chatBackground, setChatBackground, colors } = useTheme();
+
+    // تعیین رنگ متن: پیش‌فرض سیاه، ولی اگر کاربر رنگ خاص '#050000ff' را انتخاب کرد سفید شود
+    const isSpecialDark = chatBackground.type === 'color' && chatBackground.value === '#050000ff';
+    const dynamicTextColor = isSpecialDark ? '#ffffff' : '#000000';
 
     // Normalize params: useLocalSearchParams can return string | string[]
     const roomIdStr: string | null = Array.isArray(roomId) ? (roomId[0] ?? null) : (roomId ?? null);
@@ -57,14 +63,18 @@ export default function ChatRoom() {
     const [isRecording, setIsRecording] = useState(false);
     const [recordingDuration, setRecordingDuration] = useState(0);
     const [playingAudio, setPlayingAudio] = useState<string | null>(null);
-    // بعد از stateهای موجود، این خط رو اضافه کن:
     const [isCanceling, setIsCanceling] = useState(false);
+    const changeChatBackground = (color: string) => {
+        setChatBackground({ type: 'color', value: color });
+    };
 
     // ref ها
     const flatListRef = useRef<FlatList>(null);
     const recordingTimerRef = useRef<number | null>(null);
     const soundRef = useRef<Audio.Sound | null>(null);
     const channelRef = useRef<any>(null);
+    // refs for tap-toggle recording + drag-to-cancel
+    const touchStartXRef = useRef<number | null>(null);
 
     const CACHE_PREFIX = 'afghanchat:';
 
@@ -488,45 +498,75 @@ export default function ChatRoom() {
         const secs = seconds % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
+    // این کد رو دقیقاً قبل از تابع renderMessage اضافه کن:
+
+    const ColorPicker = () => (
+        <View style={styles.colorPicker}>
+            {['#ff6b6b', '#48dbfb', '#1dd1a1', '#c5e241ff', '#f368e0', '#050000ff'].map(color => (
+                <TouchableOpacity
+                    key={color}
+                    style={[styles.colorOption, { backgroundColor: color }]}
+                    onPress={() => changeChatBackground(color)}
+                />
+            ))}
+        </View>
+    );
 
     // رندر هر پیام
     const renderMessage = ({ item }: { item: Message }) => {
         const isMyMessage = item.sender_id === currentUser?.id;
-        const isAudio = item.message_type === 'voice'; // <-- هماهنگ با upload/index
+        const isAudio = item.message_type === 'voice';
         const isPlaying = playingAudio === item.audio_url;
 
         return (
+
             <View style={[
                 styles.messageContainer,
+
                 isMyMessage ? styles.myMessageContainer : styles.otherMessageContainer
             ]}>
                 <View style={[
                     styles.messageBubble,
                     isMyMessage ? styles.myMessageBubble : styles.otherMessageBubble,
-                    isAudio && styles.audioMessageBubble
+                    isAudio && styles.audioMessageBubble,
+                    { backgroundColor: chatBackground.type === 'color' ? chatBackground.value : 'رنگ پیش‌فرض' },
+
                 ]}>
                     {isAudio ? (
+                        // WhatsApp-like audio bubble (visual only)
                         <TouchableOpacity
-                            style={styles.audioButton}
+                            style={[styles.audioRow, isMyMessage ? styles.audioRowMy : styles.audioRowOther]}
                             onPress={() => isPlaying ? stopAudio() : playAudio(item.audio_url!)}
                             disabled={!item.audio_url}
                         >
-                            <Text style={styles.audioIcon}>
-                                {isPlaying ? '⏸️' : '🔊'}
-                            </Text>
-                            <View style={styles.audioInfo}>
-                                <Text style={styles.audioText}>
-                                    {isPlaying ? 'در حال پخش...' : 'پیام صوتی'}
-                                </Text>
-                                <Text style={styles.audioDuration}>
-                                    {isPlaying ? 'کلیک برای توقف' : 'کلیک برای پخش'}
-                                </Text>
+                            <View style={styles.playButtonCircle}>
+                                <Text style={[styles.playIcon, { color: dynamicTextColor }]}>{isPlaying ? '⏸' : '▶'}</Text>
                             </View>
+
+                            <View style={styles.audioWaveContainer}>
+                                {/* simple waveform bars as visual */}
+                                <View style={styles.waveBars}>
+                                    <View style={[styles.waveBar, styles.waveBarSmall]} />
+                                    <View style={[styles.waveBar, styles.waveBarMedium]} />
+                                    <View style={[styles.waveBar, styles.waveBarLarge]} />
+                                    <View style={[styles.waveBar, styles.waveBarMedium]} />
+                                    <View style={[styles.waveBar, styles.waveBarSmall]} />
+                                </View>
+                            </View>
+
+                            <Text style={[
+                                isMyMessage ? styles.myMessageTime : styles.otherMessageTime,
+                                { color: dynamicTextColor }
+                            ]}>
+                                {/* we don't have duration field; show hint */}
+                                {isPlaying ? 'در حال پخش' : 'صدا'}
+                            </Text>
                         </TouchableOpacity>
                     ) : (
                         <Text style={[
                             styles.messageText,
-                            isMyMessage ? styles.myMessageText : styles.otherMessageText
+                            isMyMessage ? styles.myMessageText : styles.otherMessageText,
+                            { color: dynamicTextColor }
                         ]}>
                             {item.content}
                         </Text>
@@ -534,7 +574,8 @@ export default function ChatRoom() {
 
                     <Text style={[
                         styles.messageTime,
-                        isMyMessage ? styles.myMessageTime : styles.otherMessageTime
+                        isMyMessage ? styles.myMessageTime : styles.otherMessageTime,
+                        { color: dynamicTextColor }
                     ]}>
                         {new Date(item.created_at).toLocaleTimeString('fa-IR', {
                             hour: '2-digit',
@@ -550,7 +591,7 @@ export default function ChatRoom() {
         return (
             <View style={styles.center}>
                 <StatusBar barStyle="dark-content" />
-                <ActivityIndicator size="large" color="#007AFF" />
+                <ActivityIndicator size="large" color="#2468bbff" />
                 <Text style={styles.loadingText}>در حال بارگذاری چت...</Text>
             </View>
         );
@@ -558,29 +599,37 @@ export default function ChatRoom() {
 
     return (
         <KeyboardAvoidingView
-            style={styles.container}
+            style={[styles.container, { backgroundColor: chatBackground.type === 'color' ? chatBackground.value : colors.background }]}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 145 : 70}
         >
             <StatusBar barStyle="light-content" />
             {/* هدر */}
-            <View style={styles.header}>
+            <ColorPicker />
+            <View style={[
+                styles.header,
+                {
+                    backgroundColor: chatBackground.type === 'color' ? chatBackground.value : colors.surface
+                }
+            ]}>
                 <TouchableOpacity
                     style={styles.backButton}
                     onPress={() => router.back()}
                 >
-                    <Text style={styles.backButtonText}>←</Text>
+                    <Text style={[styles.backButtonText, { color: dynamicTextColor }]}>←</Text>
                 </TouchableOpacity>
                 <View style={styles.headerInfo}>
-                    <Text style={styles.headerTitle}>
+                    <Text style={[styles.headerTitle, { color: dynamicTextColor }]}>
                         {otherUserNameStr || 'چت'}
                     </Text>
-                    <Text style={styles.headerSubtitle}>
+                    <Text style={[styles.headerSubtitle, { color: dynamicTextColor }]}>
                         {messages.length} پیام
                     </Text>
                 </View>
                 <View style={styles.headerPlaceholder} />
             </View>
+
+
 
             {/* لیست پیام‌ها */}
             <FlatList
@@ -595,8 +644,8 @@ export default function ChatRoom() {
                 showsVerticalScrollIndicator={false}
                 ListEmptyComponent={
                     <View style={styles.emptyContainer}>
-                        <Text style={styles.emptyText}>🎉 گفتگو را شروع کنید!</Text>
-                        <Text style={styles.emptySubText}>
+                        <Text style={[styles.emptyText, { color: dynamicTextColor }]}>🎉 گفتگو را شروع کنید!</Text>
+                        <Text style={[styles.emptySubText, { color: dynamicTextColor }]}>
                             اولین پیام خود را ارسال کنید
                         </Text>
                     </View>
@@ -607,11 +656,11 @@ export default function ChatRoom() {
             {isRecording && (
                 <View style={styles.recordingOverlay}>
                     <View style={styles.recordingContainer}>
-                        <Text style={styles.recordingText}>🔴 در حال ضبط...</Text>
-                        <Text style={styles.recordingTime}>
+                        <Text style={[styles.recordingText, { color: dynamicTextColor }]}>🔴 در حال ضبط...</Text>
+                        <Text style={[styles.recordingTime, { color: dynamicTextColor }]}>
                             {formatRecordingTime(recordingDuration)}
                         </Text>
-                        <Text style={styles.recordingHint}>
+                        <Text style={[styles.recordingHint, { color: dynamicTextColor }]}>
                             برای ارسال رها کنید، برای لغو بکشید
                         </Text>
                     </View>
@@ -619,7 +668,12 @@ export default function ChatRoom() {
             )}
 
             {/* نوار ورود پیام */}
-            <View style={styles.inputContainer}>
+            <View style={[
+                styles.inputContainer,
+                {
+                    backgroundColor: chatBackground.type === 'color' ? chatBackground.value : colors.surface
+                }
+            ]}>
                 <TextInput
                     style={styles.textInput}
                     value={newMessage}
@@ -631,20 +685,47 @@ export default function ChatRoom() {
                     textAlignVertical="center"
                 />
 
-                <TouchableOpacity
+                {/* Record button: tap to toggle start/stop, while recording drag left to cancel */}
+                <View
+                    onStartShouldSetResponder={() => true}
+                    onResponderGrant={(e) => {
+                        touchStartXRef.current = e.nativeEvent.pageX;
+                    }}
+                    onResponderMove={(e) => {
+                        // while pressing, if recording active check horizontal move to cancel
+                        const moveX = e.nativeEvent.pageX;
+                        if (isRecording && touchStartXRef.current != null) {
+                            const dx = moveX - touchStartXRef.current;
+                            if (dx < -50) {
+                                if (!isCanceling) setIsCanceling(true);
+                            } else {
+                                if (isCanceling) setIsCanceling(false);
+                            }
+                        }
+                    }}
+                    onResponderRelease={() => {
+                        // toggle behavior: if currently recording -> stop (or cancel), else start
+                        if (isRecording) {
+                            stopRecording(isCanceling);
+                        } else {
+                            startRecording();
+                        }
+                        // reset cancel state and touch start
+                        setIsCanceling(false);
+                        touchStartXRef.current = null;
+                    }}
                     style={[
                         styles.recordButton,
                         isRecording && styles.recordButtonActive,
                         isCanceling && styles.recordButtonCanceling
                     ]}
-                    onPressIn={startRecording}
-                    onPressOut={() => stopRecording(isCanceling)}
-                    disabled={loading}
+                    accessible
+                    accessibilityLabel="Record voice message. Tap to start/stop, slide left while recording to cancel."
                 >
-                    <Text style={styles.recordButtonText}>
-                        {isCanceling ? '❌' : (isRecording ? '⏹️' : '🎤')}
+                    <Text style={[styles.recordButtonText, { color: dynamicTextColor }]}>
+                        {isCanceling ? 'لغو' : (isRecording ? '⏹️' : '🎤')}
                     </Text>
-                </TouchableOpacity>
+                </View>
 
                 <TouchableOpacity
                     style={[
@@ -655,15 +736,17 @@ export default function ChatRoom() {
                     disabled={!newMessage.trim() || loading}
                 >
                     {loading ? (
-                        <ActivityIndicator size="small" color="white" />
+                        <ActivityIndicator size="small" />
                     ) : (
-                        <Text style={styles.sendButtonText}>➤</Text>
+                        <Text style={[styles.sendButtonText, { color: dynamicTextColor }]}>➤</Text>
                     )}
                 </TouchableOpacity>
             </View>
         </KeyboardAvoidingView>
     );
-} const styles = StyleSheet.create({
+}
+
+const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#f8f9fa',
@@ -683,24 +766,24 @@ export default function ChatRoom() {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: '#007AFF',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        paddingTop: Platform.OS === 'ios' ? 60 : 40,
+
+        paddingHorizontal: 15,
+        paddingVertical: 1,
+        paddingTop: Platform.OS === 'ios' ? 6 : 1,
         borderBottomLeftRadius: 20,
         borderBottomRightRadius: 20,
         elevation: 4,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
+        shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.1,
         shadowRadius: 8,
     },
     backButton: {
-        padding: 8,
+        padding: 1,
     },
     backButtonText: {
         color: 'white',
-        fontSize: 20,
+        fontSize: 40,
         fontWeight: 'bold',
     },
     headerInfo: {
@@ -708,17 +791,17 @@ export default function ChatRoom() {
         alignItems: 'center',
     },
     headerTitle: {
-        color: 'white',
-        fontSize: 18,
+        color: 'rgba(46, 16, 16, 0.9)',
+        fontSize: 25,
         fontWeight: 'bold',
     },
     headerSubtitle: {
-        color: 'rgba(255,255,255,0.9)',
-        fontSize: 12,
-        marginTop: 2,
+        color: 'rgba(46, 16, 16, 0.9)',
+        fontSize: 15,
+        marginTop: 0,
     },
     headerPlaceholder: {
-        width: 40,
+        width: 20,
     },
     messagesList: {
         flex: 1,
@@ -743,19 +826,24 @@ export default function ChatRoom() {
         paddingVertical: 12,
         borderRadius: 20,
         marginVertical: 2,
+        borderColor: '#7314e0ff',
     },
     myMessageBubble: {
         backgroundColor: '#007AFF',
         borderBottomRightRadius: 6,
+        borderColor: '#7314e0ff',
+        borderWidth: 3,
     },
     otherMessageBubble: {
         backgroundColor: 'white',
-        borderBottomLeftRadius: 6,
+        borderBottomLeftRadius: 20,
+        borderColor: '#7314e0ff',
         elevation: 2,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.1,
         shadowRadius: 4,
+        borderWidth: 3,
     },
     audioMessageBubble: {
         paddingVertical: 10,
@@ -766,10 +854,10 @@ export default function ChatRoom() {
         lineHeight: 22,
     },
     myMessageText: {
-        color: 'white',
+        color: '#a3149cff',
     },
     otherMessageText: {
-        color: '#1a1a1a',
+        color: '#a3149cff',
     },
     messageTime: {
         fontSize: 10,
@@ -830,12 +918,12 @@ export default function ChatRoom() {
         backgroundColor: 'white',
         borderTopWidth: 1,
         borderTopColor: '#e9ecef',
-        paddingBottom: Platform.OS === 'ios' ? 25 : 16,
+        paddingBottom: Platform.OS === 'ios' ? 50 : 16,
     },
     textInput: {
         flex: 1,
         borderWidth: 1,
-        borderColor: '#e9ecef',
+        borderColor: '#838da3ff',
         borderRadius: 25,
         paddingHorizontal: 20,
         paddingVertical: 12,
@@ -926,5 +1014,76 @@ export default function ChatRoom() {
         fontSize: 14,
         color: '#666',
         textAlign: 'center',
+    },
+    // audio row
+    audioRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 0,
+        paddingHorizontal: 76,
+    },
+    audioRowMy: {
+        backgroundColor: '#25D366',
+        borderRadius: 16,
+        // ensure white text
+    },
+    audioRowOther: {
+        backgroundColor: '#920d9eff',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#e6e6e6'
+    },
+    playButtonCircle: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: 'rgba(32, 11, 11, 0.15)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 10
+    },
+    playIcon: {
+        color: '#fff',
+        fontSize: 14,
+        fontWeight: '700'
+    },
+    audioWaveContainer: {
+        flex: 1,
+        justifyContent: 'center'
+    },
+    waveBars: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        gap: 4 // RN may ignore; visual helper
+    },
+    waveBar: {
+        width: 3,
+        backgroundColor: 'rgba(255,255,255,0.9)',
+        marginHorizontal: 2,
+        borderRadius: 2,
+        height: 8
+    },
+    waveBarSmall: { height: 8, opacity: 0.8 },
+    waveBarMedium: { height: 12, opacity: 0.9 },
+    waveBarLarge: { height: 16, opacity: 1.0 },
+    // در انتهای فایل، به بخش styles اضافه کن:
+
+    colorPicker: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 10,
+        backgroundColor: 'rgba(126, 12, 12, 0.9)',
+        marginHorizontal: 16,
+        marginTop: 10,
+        borderRadius: 20,
+    },
+    colorOption: {
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        marginHorizontal: 8,
+        borderWidth: 2,
+        borderColor: '#7314e0ff',
     },
 });

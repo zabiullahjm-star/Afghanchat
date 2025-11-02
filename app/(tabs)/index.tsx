@@ -1,5 +1,6 @@
 // app/(tabs)/index.tsx  (یا مسیر فایل فعلی شما)
 import React, { useEffect, useState, useRef } from 'react';
+import { useTheme } from '../../contexts/ThemeContext';
 import {
   View,
   Text,
@@ -10,7 +11,9 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
-import * as SecureStore from 'expo-secure-store'; // <-- added
+import * as SecureStore from 'expo-secure-store';
+import ThemedView from '../../components/themed-view';
+import ThemedText from '../../components/themed-text';
 
 type ChatRoom = {
   id: string;
@@ -27,6 +30,7 @@ export default function ChatListScreen() {
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const { colors } = useTheme();
 
   // cache برای username ها تا هر بار از سرور دوباره گرفته نشه
   const usernameCacheRef = useRef<Record<string, string>>({});
@@ -275,19 +279,19 @@ export default function ChatListScreen() {
   // نمایشloading اولیه
   if (loadingInitial || !currentUser) {
     return (
-      <View style={styles.center}>
+      <ThemedView style={styles.center}>
         <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={{ marginTop: 12 }}>{!currentUser ? 'در حال دریافت اطلاعات کاربر...' : 'در حال بارگذاری مکالمات...'}</Text>
-      </View>
+        <ThemedText style={{ marginTop: 12 }}>{!currentUser ? 'در حال دریافت اطلاعات کاربر...' : 'در حال بارگذاری مکالمات...'}</ThemedText>
+      </ThemedView>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>💬 مکالمات من</Text>
-        <Text style={styles.subtitle}>{chatRooms.length} مکالمه</Text>
-      </View>
+    <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
+      <ThemedView style={styles.header}>
+        <ThemedText style={styles.title}>💬 مکالمات من</ThemedText>
+        <ThemedText style={styles.subtitle}>{chatRooms.length} مکالمه</ThemedText>
+      </ThemedView>
 
       <FlatList
         data={chatRooms}
@@ -302,37 +306,37 @@ export default function ChatListScreen() {
               } as any)
             }
           >
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
+            <ThemedView style={styles.avatar}>
+              <ThemedText style={styles.avatarText}>
                 {(item.other_user_name || '').charAt(0)}
-              </Text>
-            </View>
+              </ThemedText>
+            </ThemedView>
 
-            <View style={styles.chatInfo}>
-              <Text style={styles.userName}>{item.other_user_name}</Text>
-              <Text style={styles.lastMessage} numberOfLines={1}>
+            <ThemedView style={styles.chatInfo}>
+              <ThemedText style={styles.userName}>{item.other_user_name}</ThemedText>
+              <ThemedText style={styles.lastMessage} numberOfLines={1}>
                 {/* اگر آخرین پیام از خود کاربر بوده، پیشوند 'شما:' نشان بده */}
                 {item.last_message_type === 'voice'
                   ? '🔊 ویس'
                   : (item.last_message_sender_id === currentUser.id ? 'شما: ' : '') + item.last_message}
-              </Text>
-            </View>
+              </ThemedText>
+            </ThemedView>
 
-            <View style={styles.timeContainer}>
-              <Text style={styles.time}>{timeAgo(item.last_message_at)}</Text>
-            </View>
+            <ThemedView style={styles.timeContainer}>
+              <ThemedText style={styles.time}>{timeAgo(item.last_message_at)}</ThemedText>
+            </ThemedView>
           </TouchableOpacity>
         )}
         ListEmptyComponent={
-          <View style={styles.emptyContainer}>
+          <ThemedView style={styles.emptyContainer}>
             <Text style={styles.emptyText}>هنوز هیچ مکالمه‌ای ندارید</Text>
             <Text style={styles.emptySubText}>
               برای شروع یک چت جدید، به صفحه مخاطبین رفته کاربر مورد نظر را جستجو کنید
             </Text>
-          </View>
+          </ThemedView>
         }
       />
-    </View>
+    </ThemedView>
   );
 }
 
@@ -360,7 +364,7 @@ const styles = StyleSheet.create({
   avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   avatarText: { color: 'white', fontSize: 20, fontWeight: 'bold' },
   chatInfo: { flex: 1 },
-  userName: { fontSize: 16, fontWeight: 'bold', marginBottom: 4, color: '#1a1a1a' },
+  userName: { fontSize: 16, fontWeight: 'bold', marginBottom: 4, color: '#666' },
   lastMessage: { fontSize: 14, color: '#666' },
   timeContainer: { alignItems: 'flex-end' },
   time: { fontSize: 12, color: '#999', marginBottom: 4 },

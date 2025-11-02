@@ -5,7 +5,7 @@ import { Session } from '@supabase/supabase-js';
 import { ActivityIndicator, View, Text } from 'react-native';
 import UpdateChecker from '../components/UpdateChecker';
 import { useRouter, useSegments } from 'expo-router';
-
+import { ThemeProvider } from '../contexts/ThemeContext';
 export default function RootLayout() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
@@ -60,18 +60,20 @@ export default function RootLayout() {
   }
 
   return (
-    <View style={{ flex: 1 }}>
-      <UpdateChecker />
-      <Stack screenOptions={{ headerShown: false }}>
-        {!session ? (
-          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-        ) : (
-          <>
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="chat/[roomId]" options={{ headerShown: false }} />
-          </>
-        )}
-      </Stack>
-    </View>
+    <ThemeProvider>
+      <View style={{ flex: 1 }}>
+        <UpdateChecker />
+        <Stack screenOptions={{ headerShown: false }}>
+          {!session ? (
+            <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          ) : (
+            <>
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="chat/[roomId]" options={{ headerShown: false }} />
+            </>
+          )}
+        </Stack>
+      </View>
+    </ThemeProvider>
   );
 }

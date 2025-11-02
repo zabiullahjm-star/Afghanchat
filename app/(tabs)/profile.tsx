@@ -8,15 +8,19 @@ import {
     ActivityIndicator,
     ScrollView
 } from 'react-native';
+import ThemedView from '../../components/themed-view';
+import ThemedText from '../../components/themed-text';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
 import { User } from '@supabase/supabase-js';
+import { useTheme } from '../../contexts/ThemeContext';
 
 export default function ProfileScreen() {
     const router = useRouter();
     const [user, setUser] = useState<User | null>(null);
     const [profile, setProfile] = useState<any | null>(null);
     const [loading, setLoading] = useState(true);
+    const { appTheme, setAppTheme, colors, isDark } = useTheme();
 
     useEffect(() => {
         fetchUserData();
@@ -73,22 +77,22 @@ export default function ProfileScreen() {
 
     if (loading) {
         return (
-            <View style={styles.center}>
+            <ThemedView style={styles.center}>
                 <ActivityIndicator size="large" color="#007AFF" />
-                <Text>در حال بارگذاری...</Text>
-            </View>
+                <ThemedText>در حال بارگذاری...</ThemedText>
+            </ThemedView>
         );
     }
 
     // اگر کاربر لاگین نکرده
     if (!user) {
         return (
-            <View style={styles.container}>
-                <View style={styles.header}>
+            <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
+                <ThemedView style={styles.header}>
                     <Text style={styles.title}>👤 پروفایل</Text>
-                </View>
+                </ThemedView>
 
-                <View style={styles.notLoggedInContainer}>
+                <ThemedView style={styles.notLoggedInContainer}>
                     <Text style={styles.notLoggedInTitle}>وارد حساب خود شوید</Text>
                     <Text style={styles.notLoggedInText}>
                         برای مشاهده پروفایل و استفاده از امکانات AfghanChat باید وارد حساب کاربری خود شوید.
@@ -101,25 +105,24 @@ export default function ProfileScreen() {
                     <TouchableOpacity style={styles.signupButton} onPress={() => router.push('/signup' as any)}>
                         <Text style={styles.signupButtonText}>ثبت‌نام در AfghanChat</Text>
                     </TouchableOpacity>
-                </View>
-            </View>
+                </ThemedView>
+            </ThemedView>
         );
     }
 
     // اگر کاربر لاگین کرده
     return (
         <ScrollView style={styles.container}>
-            <View style={styles.header}>
-                <Text style={styles.title}>👤 پروفایل من</Text>
-            </View>
-
+       
+            
             {/* کارت پروفایل */}
-            <View style={styles.profileCard}>
-                <View style={styles.avatar}>
+            <ThemedView style={styles.profileCard}>
+                <ThemedView style={styles.avatar}>
                     <Text style={styles.avatarText}>
                         {profile?.full_name?.charAt(0) || user?.email?.charAt(0) || 'U'}
                     </Text>
-                </View>
+                </ThemedView>
+                
 
                 <Text style={styles.userName}>
                     {profile?.full_name || 'کاربر AfghanChat'}
@@ -128,54 +131,70 @@ export default function ProfileScreen() {
                 <Text style={styles.userEmail}>
                     {user?.email || 'ایمیل نامشخص'}
                 </Text>
-            </View>
+            </ThemedView>
+            <ThemedView>
+                <ThemedText style={{ color: colors.text }}>تنظیمات تم</ThemedText>
+
+                <TouchableOpacity onPress={() => setAppTheme('light')}>
+                    <ThemedText style={{ color: colors.text }}>حالت روشن {appTheme === 'light' && '✅'}</ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={() => setAppTheme('dark')}>
+                    <ThemedText>حالت تاریک {appTheme === 'dark' && '✅'}</ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={() => setAppTheme('auto')}>
+                    <ThemedText>حالت خودکار {appTheme === 'auto' && '✅'}</ThemedText>
+                </TouchableOpacity>
+            </ThemedView>
 
             {/* اطلاعات حساب */}
-            <View style={styles.section}>
-                <Text style={styles.sectionTitle}>📋 اطلاعات حساب</Text>
+            <ThemedView style={styles.section}>
+                <ThemedText style={styles.sectionTitle}>📋 اطلاعات حساب</ThemedText>
 
-                <View style={styles.infoItem}>
-                    <Text style={styles.infoLabel}>نام کاربری:</Text>
-                    <Text style={styles.infoValue}>
+                <ThemedView style={styles.infoItem}>
+                    <ThemedText style={styles.infoLabel}>نام کاربری:</ThemedText>
+                    <ThemedText style={styles.infoValue}>
                         {profile?.username || 'we will know'}
-                    </Text>
-                </View>
+                    </ThemedText>
+                </ThemedView>
 
                 {/* در بخش اطلاعات حساب، شماره تلفن رو نشون بده */}
-                <View style={styles.infoItem}>
-                    <Text style={styles.infoLabel}>شماره تلفن:</Text>
-                    <Text style={styles.infoValue}>
+                <ThemedView style={styles.infoItem}>
+                    <ThemedText style={styles.infoLabel}>شماره تلفن:</ThemedText>
+                    <ThemedText style={styles.infoValue}>
                         {profile?.phone || 'ثبت نشده'}
-                    </Text>
-                </View>
+                    </ThemedText>
+                </ThemedView>
 
-                <View style={styles.infoItem}><Text style={styles.infoLabel}>ایمیل:</Text>
-                    <Text style={styles.infoValue}>{user?.email}</Text>
-                </View>
+                <ThemedView style={styles.infoItem}><Text style={styles.infoLabel}>ایمیل:</Text>
+                    <ThemedText style={styles.infoValue}>{user?.email}</ThemedText>
+                </ThemedView>
 
-                <View style={styles.infoItem}>
-                    <Text style={styles.infoLabel}>تاریخ عضویت:</Text>
-                    <Text style={styles.infoValue}>
+                <ThemedView style={styles.infoItem}>
+                    <ThemedText style={styles.infoLabel}>تاریخ عضویت:</ThemedText>
+                    <ThemedText style={styles.infoValue}>
                         {profile?.created_at ? new Date(profile.created_at).toLocaleDateString('fa-IR') : 'نامشخص'}
-                    </Text>
-                </View>
-            </View>
+                    </ThemedText>
+                </ThemedView>
+            </ThemedView>
 
             {/* دکمه خروج */}
             <TouchableOpacity
                 style={styles.logoutButton}
                 onPress={handleLogout}
             >
-                <Text style={styles.logoutText}>🚪 خروج از حساب</Text>
+                <ThemedText style={styles.logoutText}>🚪 خروج از حساب</ThemedText>
             </TouchableOpacity>
         </ScrollView>
+        
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#fff'
+       
     },
     center: {
         flex: 1,
@@ -186,7 +205,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingTop: 60,
         paddingBottom: 20,
-        backgroundColor: '#f8f9fa'
+    
     },
     title: {
         fontSize: 24,
@@ -242,7 +261,6 @@ const styles = StyleSheet.create({
     },
     profileCard: {
         alignItems: 'center',
-        backgroundColor: '#f8f9fa',
         padding: 20,
         borderRadius: 12,
         margin: 16,
