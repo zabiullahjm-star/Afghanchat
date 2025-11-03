@@ -202,7 +202,7 @@ export default function ContactsScreen() {
             const orParts: string[] = [];
             orParts.push(`full_name.ilike.%${query}%`);
             orParts.push(`username.ilike.%${query}%`);
-            orParts.push(`phone.ilike.%${query}%`);
+            orParts.push(`phone_digits.ilike.%${query}%`);
             if (queryDigits.length > 0) {
                 orParts.push(`phone_digits.ilike.%${queryDigits}%`);
                 if (queryDigits.length > 10) orParts.push(`phone_digits.ilike.%${queryDigits.slice(-10)}%`);

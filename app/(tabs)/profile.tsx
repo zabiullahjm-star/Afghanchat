@@ -14,6 +14,9 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
 import { User } from '@supabase/supabase-js';
 import { useTheme } from '../../contexts/ThemeContext';
+import * as SecureStore from 'expo-secure-store';
+
+const CACHE_PREFIX = 'afghanchat:';
 
 export default function ProfileScreen() {
     const router = useRouter();
@@ -22,34 +25,79 @@ export default function ProfileScreen() {
     const [loading, setLoading] = useState(true);
     const { appTheme, setAppTheme, colors, isDark } = useTheme();
 
-    useEffect(() => {
-        fetchUserData();
-    }, []);
+
+    const fetchUserDataFromServer = async (userId?: string) => {
+        try {
+            // فقط برای بروزرسانی کش و UI، بدون ست کردن loading=true (تا از نمایش spinner جلوگیری شود اگر cache وجود دارد)
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .single();
+
+            if (profile) {
+                setProfile(profile);
+                // ذخیره در کش
+                try {
+                    await SecureStore.setItemAsync(CACHE_PREFIX + 'profile:' + userId, JSON.stringify(profile));
+                } catch (e) {
+                    console.warn('saveCachedProfile error', e);
+                }
+            }
+        } catch (error) {
+            console.error('.خطا در دریافت اطلاعات کاربر:', error);
+        }
+    };
+
+    const loadCachedProfile = async (userId?: string) => {
+        if (!userId) return false;
+        try {
+            const raw = await SecureStore.getItemAsync(CACHE_PREFIX + 'profile:' + userId);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed) {
+                    setProfile(parsed);
+                    // چون کش داریم، دیگه نباید صفحه لودینگ کلی ببینیم
+                    setLoading(false);
+                    return true;
+                }
+            }
+        } catch (e) {
+            console.warn('loadCachedProfile error', e);
+        }
+        return false;
+    };
 
     const fetchUserData = async () => {
         try {
-            setLoading(true);
-
+            // دریافت کاربر از supabase
             const { data: { user } } = await supabase.auth.getUser();
 
             if (user) {
                 setUser(user);
+                // ابتدا تلاش برای خواندن کش محلی
+                const hadCache = await loadCachedProfile(user.id);
 
-                const { data: profile } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('id', user.id)
-                    .single();
+                // همیشه سرور را در پس‌زمینه زده و کش را بروز کن
+                await fetchUserDataFromServer(user.id);
 
-                setProfile(profile);
+                // اگر کش نداشتیم، بعد از fetch سرور loading را خاموش کن
+                if (!hadCache) setLoading(false);
+            } else {
+                // کاربر لاگین نیست
+                setUser(null);
+                setProfile(null);
+                setLoading(false);
             }
-
         } catch (error) {
             console.error('.خطا در دریافت اطلاعات کاربر:', error);
-        } finally {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        fetchUserData();
+    }, []);
 
     const handleLogout = async () => {
         Alert.alert(
@@ -89,21 +137,21 @@ export default function ProfileScreen() {
         return (
             <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
                 <ThemedView style={styles.header}>
-                    <Text style={styles.title}>👤 پروفایل</Text>
+                    <ThemedText style={styles.title}>👤 پروفایل</ThemedText>
                 </ThemedView>
 
                 <ThemedView style={styles.notLoggedInContainer}>
-                    <Text style={styles.notLoggedInTitle}>وارد حساب خود شوید</Text>
-                    <Text style={styles.notLoggedInText}>
+                    <ThemedText style={styles.notLoggedInTitle}>وارد حساب خود شوید</ThemedText>
+                    <ThemedText style={styles.notLoggedInText}>
                         برای مشاهده پروفایل و استفاده از امکانات AfghanChat باید وارد حساب کاربری خود شوید.
-                    </Text>
+                    </ThemedText>
 
                     <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-                        <Text style={styles.loginButtonText}>ورود به حساب</Text>
+                        <ThemedText style={styles.loginButtonText}>ورود به حساب</ThemedText>
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.signupButton} onPress={() => router.push('/signup' as any)}>
-                        <Text style={styles.signupButtonText}>ثبت‌نام در AfghanChat</Text>
+                        <ThemedText style={styles.signupButtonText}>ثبت‌نام در AfghanChat</ThemedText>
                     </TouchableOpacity>
                 </ThemedView>
             </ThemedView>
@@ -113,8 +161,8 @@ export default function ProfileScreen() {
     // اگر کاربر لاگین کرده
     return (
         <ScrollView style={styles.container}>
-       
-            
+
+
             {/* کارت پروفایل */}
             <ThemedView style={styles.profileCard}>
                 <ThemedView style={styles.avatar}>
@@ -122,15 +170,15 @@ export default function ProfileScreen() {
                         {profile?.full_name?.charAt(0) || user?.email?.charAt(0) || 'U'}
                     </Text>
                 </ThemedView>
-                
 
-                <Text style={styles.userName}>
+
+                <ThemedText style={styles.userName}>
                     {profile?.full_name || 'کاربر AfghanChat'}
-                </Text>
+                </ThemedText>
 
-                <Text style={styles.userEmail}>
+                <ThemedText style={styles.userEmail}>
                     {user?.email || 'ایمیل نامشخص'}
-                </Text>
+                </ThemedText>
             </ThemedView>
             <ThemedView>
                 <ThemedText style={{ color: colors.text }}>تنظیمات تم</ThemedText>
@@ -163,7 +211,7 @@ export default function ProfileScreen() {
                 <ThemedView style={styles.infoItem}>
                     <ThemedText style={styles.infoLabel}>شماره تلفن:</ThemedText>
                     <ThemedText style={styles.infoValue}>
-                        {profile?.phone || 'ثبت نشده'}
+                        {profile?.phone_digits || 'ثبت نشده'}
                     </ThemedText>
                 </ThemedView>
 
@@ -187,14 +235,14 @@ export default function ProfileScreen() {
                 <ThemedText style={styles.logoutText}>🚪 خروج از حساب</ThemedText>
             </TouchableOpacity>
         </ScrollView>
-        
+
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-       
+
     },
     center: {
         flex: 1,
@@ -205,7 +253,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingTop: 60,
         paddingBottom: 20,
-    
+
     },
     title: {
         fontSize: 24,

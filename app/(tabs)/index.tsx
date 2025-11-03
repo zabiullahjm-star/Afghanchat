@@ -42,19 +42,22 @@ export default function ChatListScreen() {
 
   // load cached chatRooms سریعاً برای نمایش قبل از fetch از سرور
   const loadCachedChatRooms = async (userId: string | undefined) => {
-    if (!userId) return;
+    if (!userId) return false;
     try {
       const raw = await SecureStore.getItemAsync(CACHE_PREFIX + 'chatrooms:' + userId);
       if (raw) {
         const parsed = JSON.parse(raw) as ChatRoom[];
         if (parsed && parsed.length > 0) {
           setChatRooms(parsed);
+          // چون کش داریم، سریعاً صفحه را از کش بالا بیار
           setLoadingInitial(false);
+          return true;
         }
       }
     } catch (e) {
       console.warn('loadCachedChatRooms error', e);
     }
+    return false;
   };
 
   const saveCachedChatRooms = async (userId: string | undefined, rooms: ChatRoom[]) => {
@@ -84,8 +87,9 @@ export default function ChatListScreen() {
   useEffect(() => {
     if (!currentUser || !currentUser.id) return;
     // اول سعی کن از cache سریع نمایش بدی
-    loadCachedChatRooms(currentUser.id).then(() => {
-      // بعد از نمایش cache، fetch واقعی را انجام بده
+    loadCachedChatRooms(currentUser.id).then((hadCache) => {
+      // سپس fetch واقعی را در پس‌زمینه انجام بده
+      // (فچ نباید باعث نشان دادن لودینگ شود اگر کش داشتیم)
       fetchChatRooms();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -195,15 +199,20 @@ export default function ChatListScreen() {
         other_user_name: otherName
       };
 
+      let updated: ChatRoom[];
       if (existingIndex === -1) {
         // اضافه کردن به صدر لیست
-        return [newRoom, ...prev];
+        updated = [newRoom, ...prev];
       } else {
         // بروزرسانی مورد و جابجایی به صدر
         const copy = [...prev];
         copy.splice(existingIndex, 1);
-        return [newRoom, ...copy];
+        updated = [newRoom, ...copy];
       }
+
+      // ذخیره تغییرات در کش
+      saveCachedChatRooms(currentUser.id, updated).catch(e => console.warn('saveCachedChatRooms', e));
+      return updated;
     });
 
     // اگر username کش نشده بود، تلاش کن آن را بگیری
@@ -233,8 +242,7 @@ export default function ChatListScreen() {
   useEffect(() => {
     if (!currentUser || !currentUser.id) return;
 
-    // یکبار fetch اولیه
-    fetchChatRooms();
+    // حذف فراخوانی اضافی fetchChatRooms() از اینجا — fetch اولیه در useEffect قبلی انجام شد
 
     // ساخت filter به صورت رشته (بدون backtick)
     const filterStr = 'or(sender_id.eq.' + currentUser.id + ',receiver_id.eq.' + currentUser.id + ')';

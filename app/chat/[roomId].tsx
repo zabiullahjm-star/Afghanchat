@@ -73,25 +73,30 @@ export default function ChatRoom() {
     const recordingTimerRef = useRef<number | null>(null);
     const soundRef = useRef<Audio.Sound | null>(null);
     const channelRef = useRef<any>(null);
+    const recordingRef = useRef<Audio.Recording | null>(null);
     // refs for tap-toggle recording + drag-to-cancel
     const touchStartXRef = useRef<number | null>(null);
+    // keep recordingRef in sync with state
+    useEffect(() => { recordingRef.current = recording; }, [recording]);
 
     const CACHE_PREFIX = 'afghanchat:';
 
     // load cached messages for this room
     const loadCachedMessages = async (roomIdLocal?: string | null) => {
-        if (!roomIdLocal) return;
+        if (!roomIdLocal) return false;
         try {
             const raw = await SecureStore.getItemAsync(CACHE_PREFIX + 'room:' + roomIdLocal);
             if (raw) {
                 const parsed = JSON.parse(raw) as Message[];
                 if (parsed && parsed.length > 0) {
                     setMessages(parsed);
+                    return true;
                 }
             }
         } catch (e) {
             console.warn('loadCachedMessages error', e);
         }
+        return false;
     };
 
     const saveCachedMessages = async (roomIdLocal: string | undefined | null, msgs: Message[]) => {
@@ -107,6 +112,42 @@ export default function ChatRoom() {
     useEffect(() => {
         initializeChat();
         return () => {
+            // async cleanup (fire-and-forget)
+            (async () => {
+                try {
+                    if (recordingTimerRef.current) {
+                        clearInterval(recordingTimerRef.current);
+                        recordingTimerRef.current = null;
+                    }
+                    // if a recording is active, stop & unload it and do NOT upload (cancel)
+                    if (recordingRef.current) {
+                        try {
+                            await recordingRef.current.stopAndUnloadAsync();
+                        } catch (e) { /* ignore */ }
+                        recordingRef.current = null;
+                    }
+                    // stop and unload playing audio if any
+                    if (soundRef.current) {
+                        try {
+                            await soundRef.current.stopAsync();
+                            await soundRef.current.unloadAsync();
+                        } catch (e) { /* ignore */ }
+                        soundRef.current = null;
+                    }
+                } catch (e) {
+                    console.warn('cleanup error', e);
+                } finally {
+                    // cleanup realtime channel
+                    try {
+                        if (channelRef.current) {
+                            supabase.removeChannel(channelRef.current);
+                            channelRef.current = null;
+                        }
+                    } catch (e) {
+                        console.warn('removeChannel error', e);
+                    }
+                }
+            })();
             // پاکسازی
             if (recordingTimerRef.current) {
                 clearInterval(recordingTimerRef.current);
@@ -129,8 +170,6 @@ export default function ChatRoom() {
 
     const initializeChat = async () => {
         try {
-            setLoading(true);
-
             // دریافت کاربر فعلی
             const { data: { user } } = await supabase.auth.getUser();
             setCurrentUser(user);
@@ -140,16 +179,18 @@ export default function ChatRoom() {
                 return;
             }
 
-            // اگر roomId معتبر نیست، از ادامه جلوگیری کن
             if (!roomIdStr) {
                 console.warn('No roomId provided');
-                setLoading(false);
                 return;
             }
-            // اول کش محلی رو سریعاً بارگزاری کن تا UI سریع باشه
-            await loadCachedMessages(roomIdStr);
 
-            // دریافت پیام‌های قبلی از سرور و بروزرسانی cache
+            // اول کش محلی رو سریعاً بارگزاری کن تا UI سریع باشه
+            const hadCache = await loadCachedMessages(roomIdStr);
+
+            // فقط در صورتی که کش خالی است، صفحه لودینگ نشان بده
+            if (!hadCache) setLoading(true);
+
+            // دریافت پیام‌های قبلی از سرور و بروزرسانی cache (در پس‌زمینه)
             await fetchMessages();
 
             // گوش دادن به پیام‌های جدید
@@ -307,6 +348,7 @@ export default function ChatRoom() {
             );
 
             setRecording(recording);
+            recordingRef.current = recording;
             setIsRecording(true);
             setRecordingDuration(0);
 
@@ -331,7 +373,8 @@ export default function ChatRoom() {
     // تابع stopRecording رو به این صورت تغییر بده:
     const stopRecording = async (cancel: boolean = false) => {
         try {
-            if (!recording) return;
+            const rec = recordingRef.current;
+            if (!rec) return;
 
             // پاکسازی تایمر
             if (recordingTimerRef.current) {
@@ -340,12 +383,19 @@ export default function ChatRoom() {
             }
 
             // توقف ضبط
-            await recording.stopAndUnloadAsync();
-            const uri = recording.getURI();
+            await rec.stopAndUnloadAsync();
+            const uri = rec.getURI();
+            // ensure we don't hold stale ref
+            recordingRef.current = null;
             // در تابع stopRecording بعد از getURI اینو اضافه کن:
             console.log('فایل ضبط شده:', uri);
             if (!uri) {
                 Alert.alert('خطا', 'فایل ضبط شده یافت نشد');
+                // clear local states
+                setIsRecording(false);
+                setRecording(null);
+                setRecordingDuration(0);
+                setIsCanceling(false);
                 return;
             }
 
@@ -654,16 +704,9 @@ export default function ChatRoom() {
 
             {/* حالت ضبط صدا */}
             {isRecording && (
-                <View style={styles.recordingOverlay}>
-                    <View style={styles.recordingContainer}>
-                        <Text style={[styles.recordingText, { color: dynamicTextColor }]}>🔴 در حال ضبط...</Text>
-                        <Text style={[styles.recordingTime, { color: dynamicTextColor }]}>
-                            {formatRecordingTime(recordingDuration)}
-                        </Text>
-                        <Text style={[styles.recordingHint, { color: dynamicTextColor }]}>
-                            برای ارسال رها کنید، برای لغو بکشید
-                        </Text>
-                    </View>
+                <View style={styles.recordingBanner}>
+                    <Text style={styles.recordingText}>🔴 در حال ضبط... {formatRecordingTime(recordingDuration)}</Text>
+                    <Text style={styles.recordingHint}>برای ارسال رها کنید، برای لغو بکشید</Text>
                 </View>
             )}
 
@@ -783,7 +826,7 @@ const styles = StyleSheet.create({
     },
     backButtonText: {
         color: 'white',
-        fontSize: 40,
+        fontSize: 22,
         fontWeight: 'bold',
     },
     headerInfo: {
@@ -792,7 +835,7 @@ const styles = StyleSheet.create({
     },
     headerTitle: {
         color: 'rgba(46, 16, 16, 0.9)',
-        fontSize: 25,
+        fontSize: 18,
         fontWeight: 'bold',
     },
     headerSubtitle: {
@@ -981,39 +1024,8 @@ const styles = StyleSheet.create({
         marginLeft: 2,
     },
     recordingOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.7)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        zIndex: 1000,
-    },
-    recordingContainer: {
-        backgroundColor: 'white',
-        padding: 24,
-        borderRadius: 16,
-        alignItems: 'center',
-        elevation: 8,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-    },
-    recordingText: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#dc3545',
-        marginBottom: 8,
-    },
-    recordingTime: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: '#333',
-        marginBottom: 8,
-    },
-    recordingHint: {
-        fontSize: 14,
-        color: '#666',
-        textAlign: 'center',
+        // removed fullscreen overlay to avoid blocking touches
+        display: 'none'
     },
     // audio row
     audioRow: {
@@ -1085,5 +1097,25 @@ const styles = StyleSheet.create({
         marginHorizontal: 8,
         borderWidth: 2,
         borderColor: '#7314e0ff',
+    },
+    recordingBanner: {
+        marginHorizontal: 16,
+        marginBottom: 8,
+        padding: 10,
+        borderRadius: 12,
+        backgroundColor: '#fff0f0',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#ffcccc'
+    },
+    recordingText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#b00020',
+        marginBottom: 4,
+    },
+    recordingHint: {
+        fontSize: 12,
+        color: '#555',
     },
 });
