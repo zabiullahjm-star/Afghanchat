@@ -22,7 +22,7 @@ export default function SignUpScreen() {
         email: '',
         password: '',
         confirmPassword: '',
-        phone: '',
+        phone_digits: '',
     });
 
     const handleSignUp = async () => {
@@ -37,7 +37,7 @@ export default function SignUpScreen() {
             return;
         }
 
-        if (!formData.phone.trim()) {
+        if (!formData.phone_digits.trim()) {
             Alert.alert('خطا', 'لطفا شماره موبایل خود را وارد کنید');
             return;
         }
@@ -55,7 +55,7 @@ export default function SignUpScreen() {
         try {
             setLoading(true);
 
-            const normalizedPhoneDigits = formData.phone.replace(/\D/g, ''); // فقط ارقام برای جستجو
+            const normalizedPhoneDigits = formData.phone_digits.replace(/\D/g, ''); // فقط ارقام برای جستجو
 
             const { data, error } = await supabase.auth.signUp({
                 email: formData.email.toLowerCase().trim(),
@@ -63,7 +63,7 @@ export default function SignUpScreen() {
                 options: {
                     data: {
                         full_name: formData.fullName.trim(),
-                        phone: formData.phone.trim()
+                        phone: formData.phone_digits.trim()
                     }
                 }
             });
@@ -78,7 +78,7 @@ export default function SignUpScreen() {
                     const upsertData = {
                         id: data.user.id,
                         full_name: formData.fullName.trim(),
-                        phone: formData.phone.trim(),
+                        phone: formData.phone_digits.trim(),
                         phone_digits: normalizedPhoneDigits,
                         // username می‌تواند بعدا تنظیم شود
                     };
@@ -184,7 +184,7 @@ export default function SignUpScreen() {
                         <TextInput
                             style={styles.input}
                             placeholder="+98 912 345 6789 یا 09123456789"
-                            value={formData.phone}
+                            value={formData.phone_digits}
                             onChangeText={(text) => updateFormData('phone', text)}
                             keyboardType="phone-pad"
                             autoCapitalize="none"

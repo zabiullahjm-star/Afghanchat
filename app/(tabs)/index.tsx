@@ -337,10 +337,10 @@ export default function ChatListScreen() {
         )}
         ListEmptyComponent={
           <ThemedView style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>هنوز هیچ مکالمه‌ای ندارید</Text>
-            <Text style={styles.emptySubText}>
+            <ThemedText style={styles.emptyText}>هنوز هیچ مکالمه‌ای ندارید</ThemedText>
+            <ThemedText style={styles.emptySubText}>
               برای شروع یک چت جدید، به صفحه مخاطبین رفته کاربر مورد نظر را جستجو کنید
-            </Text>
+            </ThemedText>
           </ThemedView>
         }
       />
@@ -365,18 +365,18 @@ function timeAgo(dateString: string) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  header: { padding: 16, paddingTop: 60, backgroundColor: '#f8f9fa', borderBottomWidth: 1, borderBottomColor: '#e9ecef' },
-  title: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', color: '#1a1a1a' },
+  header: { padding: 16, paddingTop: 60, borderBottomWidth: 1, borderBottomColor: '#e9ecef' },
+  title: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', },
   subtitle: { fontSize: 14, textAlign: 'center', color: '#666', marginTop: 4 },
   chatItem: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
   avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   avatarText: { color: 'white', fontSize: 20, fontWeight: 'bold' },
   chatInfo: { flex: 1 },
-  userName: { fontSize: 16, fontWeight: 'bold', marginBottom: 4, color: '#666' },
-  lastMessage: { fontSize: 14, color: '#666' },
+  userName: { fontSize: 16, fontWeight: 'bold', marginBottom: 4, },
+  lastMessage: { fontSize: 14, },
   timeContainer: { alignItems: 'flex-end' },
-  time: { fontSize: 12, color: '#999', marginBottom: 4 },
+  time: { fontSize: 12, marginBottom: 4 },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100 },
-  emptyText: { fontSize: 18, color: '#666', marginBottom: 8, textAlign: 'center' },
-  emptySubText: { fontSize: 14, color: '#999', textAlign: 'center' }
+  emptyText: { fontSize: 18, marginBottom: 8, textAlign: 'center' },
+  emptySubText: { fontSize: 14, textAlign: 'center' }
 });

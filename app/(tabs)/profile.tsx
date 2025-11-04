@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
-    View,
     Text,
     TouchableOpacity,
     StyleSheet,
     Alert,
     ActivityIndicator,
-    ScrollView
+    ScrollView,
+    Linking
 } from 'react-native';
 import ThemedView from '../../components/themed-view';
 import ThemedText from '../../components/themed-text';
@@ -160,82 +160,89 @@ export default function ProfileScreen() {
 
     // اگر کاربر لاگین کرده
     return (
-        <ScrollView style={styles.container}>
-
-
-            {/* کارت پروفایل */}
-            <ThemedView style={styles.profileCard}>
-                <ThemedView style={styles.avatar}>
-                    <Text style={styles.avatarText}>
-                        {profile?.full_name?.charAt(0) || user?.email?.charAt(0) || 'U'}
-                    </Text>
+        <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
+            <ScrollView contentContainerStyle={{ padding: 16 }}>
+                {/* Header card */}
+                <ThemedView style={[styles.headerCard, { backgroundColor: colors.surface }]}>
+                    <ThemedView style={styles.headerLeft}>
+                        <ThemedView style={styles.avatarLarge}>
+                            <ThemedText style={styles.avatarTextLarge}>
+                                {profile?.full_name?.charAt(0) || user?.email?.charAt(0) || 'U'}
+                            </ThemedText>
+                        </ThemedView>
+                    </ThemedView>
+                    <ThemedView style={styles.headerRight}>
+                        <ThemedText style={styles.userNameLarge}>{profile?.full_name || 'کاربر AfghanChat'}</ThemedText>
+                        <ThemedText style={styles.userEmailSmall}>{user?.email || 'ایمیل نامشخص'}</ThemedText>
+                    </ThemedView>
                 </ThemedView>
 
+                {/* Theme selector (segmented buttons) */}
+                <ThemedView style={[styles.section, { marginTop: 12 }]}>
+                    <ThemedText style={styles.sectionTitle}>🖌️ تنظیمات تم</ThemedText>
+                    <ThemedView style={styles.themeGroup}>
+                        <TouchableOpacity
+                            style={[styles.themeButton, appTheme === 'light' && styles.themeButtonActive]}
+                            onPress={() => setAppTheme('light')}
+                        >
+                            <ThemedText style={[styles.themeButtonText, appTheme === 'light' && styles.themeButtonTextActive]}>روشن</ThemedText>
+                        </TouchableOpacity>
 
-                <ThemedText style={styles.userName}>
-                    {profile?.full_name || 'کاربر AfghanChat'}
-                </ThemedText>
+                        <TouchableOpacity
+                            style={[styles.themeButton, appTheme === 'dark' && styles.themeButtonActive]}
+                            onPress={() => setAppTheme('dark')}
+                        >
+                            <ThemedText style={[styles.themeButtonText, appTheme === 'dark' && styles.themeButtonTextActive]}>تاریک</ThemedText>
+                        </TouchableOpacity>
 
-                <ThemedText style={styles.userEmail}>
-                    {user?.email || 'ایمیل نامشخص'}
-                </ThemedText>
-            </ThemedView>
-            <ThemedView>
-                <ThemedText style={{ color: colors.text }}>تنظیمات تم</ThemedText>
-
-                <TouchableOpacity onPress={() => setAppTheme('light')}>
-                    <ThemedText style={{ color: colors.text }}>حالت روشن {appTheme === 'light' && '✅'}</ThemedText>
-                </TouchableOpacity>
-
-                <TouchableOpacity onPress={() => setAppTheme('dark')}>
-                    <ThemedText>حالت تاریک {appTheme === 'dark' && '✅'}</ThemedText>
-                </TouchableOpacity>
-
-                <TouchableOpacity onPress={() => setAppTheme('auto')}>
-                    <ThemedText>حالت خودکار {appTheme === 'auto' && '✅'}</ThemedText>
-                </TouchableOpacity>
-            </ThemedView>
-
-            {/* اطلاعات حساب */}
-            <ThemedView style={styles.section}>
-                <ThemedText style={styles.sectionTitle}>📋 اطلاعات حساب</ThemedText>
-
-                <ThemedView style={styles.infoItem}>
-                    <ThemedText style={styles.infoLabel}>نام کاربری:</ThemedText>
-                    <ThemedText style={styles.infoValue}>
-                        {profile?.username || 'we will know'}
-                    </ThemedText>
+                        <TouchableOpacity
+                            style={[styles.themeButton, appTheme === 'auto' && styles.themeButtonActive]}
+                            onPress={() => setAppTheme('auto')}
+                        >
+                            <ThemedText style={[styles.themeButtonText, appTheme === 'auto' && styles.themeButtonTextActive]}>خودکار</ThemedText>
+                        </TouchableOpacity>
+                    </ThemedView>
                 </ThemedView>
 
-                {/* در بخش اطلاعات حساب، شماره تلفن رو نشون بده */}
-                <ThemedView style={styles.infoItem}>
-                    <ThemedText style={styles.infoLabel}>شماره تلفن:</ThemedText>
-                    <ThemedText style={styles.infoValue}>
-                        {profile?.phone_digits || 'ثبت نشده'}
-                    </ThemedText>
+                {/* Account info */}
+                <ThemedView style={styles.section}>
+                    <ThemedText style={styles.sectionTitle}>📋 اطلاعات حساب</ThemedText>
+                    <ThemedView style={styles.infoItem}>
+                        <ThemedText style={styles.infoLabel}>نام کاربری</ThemedText>
+                        <ThemedText style={styles.infoValue}>{profile?.username || '-'}</ThemedText>
+                    </ThemedView>
+                    <ThemedView style={styles.infoItem}>
+                        <ThemedText style={styles.infoLabel}>شماره تلفن</ThemedText>
+                        <ThemedText style={styles.infoValue}>{profile?.phone || profile?.phone_digits || 'ثبت نشده'}</ThemedText>
+                    </ThemedView>
+                    <ThemedView style={styles.infoItem}>
+                        <ThemedText style={styles.infoLabel}>تاریخ عضویت</ThemedText>
+                        <ThemedText style={styles.infoValue}>{profile?.created_at ? new Date(profile.created_at).toLocaleDateString('fa-IR') : 'نامشخص'}</ThemedText>
+                    </ThemedView>
                 </ThemedView>
 
-                <ThemedView style={styles.infoItem}><Text style={styles.infoLabel}>ایمیل:</Text>
-                    <ThemedText style={styles.infoValue}>{user?.email}</ThemedText>
+                {/* Support button */}
+                <ThemedView style={{ marginTop: 12 }}>
+                    <TouchableOpacity
+                        style={[styles.supportButton, { borderColor: colors.primary }]}
+                        onPress={() => {
+                            const url = 'https://zabiullahjm-star.github.io/price-site/';
+                            Linking.openURL(url).catch(() => Alert.alert('خطا', 'امکان باز کردن لینک وجود ندارد'));
+                        }}
+                    >
+                        <ThemedText style={[styles.supportButtonText, { color: colors.primary }]}>💬پشتیبانی و  خدمات دیگر</ThemedText>
+                        <ThemedText style={[styles.supportButtonSub, { color: colors }]}>سوال دارید؟ اینجا کلیک کنید</ThemedText>
+                    </TouchableOpacity>
                 </ThemedView>
 
-                <ThemedView style={styles.infoItem}>
-                    <ThemedText style={styles.infoLabel}>تاریخ عضویت:</ThemedText>
-                    <ThemedText style={styles.infoValue}>
-                        {profile?.created_at ? new Date(profile.created_at).toLocaleDateString('fa-IR') : 'نامشخص'}
-                    </ThemedText>
+                {/* Logout button (native Text as requested) */}
+                <ThemedView style={{ marginTop: 18 }}>
+                    <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+                        <Text style={styles.logoutText}>🚪 خروج از حساب</Text>
+                    </TouchableOpacity>
                 </ThemedView>
-            </ThemedView>
-
-            {/* دکمه خروج */}
-            <TouchableOpacity
-                style={styles.logoutButton}
-                onPress={handleLogout}
-            >
-                <ThemedText style={styles.logoutText}>🚪 خروج از حساب</ThemedText>
-            </TouchableOpacity>
-        </ScrollView>
-
+            </ScrollView>
+        </ThemedView>
     );
 }
 
@@ -335,16 +342,16 @@ const styles = StyleSheet.create({
     },
     userEmail: {
         fontSize: 16,
-        color: '#666',
+
         marginBottom: 4
     },
     userId: {
         fontSize: 12,
-        color: '#999',
+
         fontFamily: 'monospace'
     },
     section: {
-        backgroundColor: '#f8f9fa',
+
         borderRadius: 12,
         margin: 16,
         marginTop: 0,
@@ -354,7 +361,7 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: 'bold',
         marginBottom: 16,
-        color: '#333'
+
     },
     infoItem: {
         flexDirection: 'row',
@@ -366,12 +373,12 @@ const styles = StyleSheet.create({
     },
     infoLabel: {
         fontSize: 14,
-        color: '#666'
+
     },
     infoValue: {
         fontSize: 14,
         fontWeight: '500',
-        color: '#333'
+
     },
     menuItem: {
         padding: 16,
@@ -400,6 +407,72 @@ const styles = StyleSheet.create({
     },
     versionText: {
         fontSize: 12,
-        color: '#999'
+
+    },
+    headerCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        borderRadius: 12,
+        marginBottom: 6,
+    },
+    headerLeft: { marginRight: 12 },
+    headerRight: { flex: 1 },
+    avatarLarge: {
+        width: 96,
+        height: 96,
+        borderRadius: 48,
+        backgroundColor: '#007AFF',
+        justifyContent: 'center',
+        alignItems: 'center'
+    },
+    avatarTextLarge: {
+        color: 'white',
+        fontSize: 36,
+        fontWeight: '700'
+    },
+    userNameLarge: { fontSize: 20, fontWeight: '700', marginBottom: 4 },
+    userEmailSmall: { fontSize: 14, color: '#666' },
+    themeGroup: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginTop: 12
+    },
+    themeButton: {
+        flex: 1,
+        paddingVertical: 12,
+        marginHorizontal: 6,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#e0e0e0',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'transparent'
+    },
+    themeButtonActive: {
+        backgroundColor: '#007AFF',
+        borderColor: '#007AFF'
+    },
+    themeButtonText: {
+        fontSize: 14,
+        fontWeight: '600'
+    },
+    themeButtonTextActive: {
+        color: 'white'
+    },
+    supportButton: {
+        padding: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        alignItems: 'flex-start',
+        backgroundColor: 'transparent'
+    },
+    supportButtonText: {
+        fontSize: 16,
+        fontWeight: '700'
+    },
+    supportButtonSub: {
+        fontSize: 13,
+        marginTop: 4
     }
 });
