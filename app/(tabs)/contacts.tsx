@@ -15,6 +15,7 @@ import {
     PermissionsAndroid,
     AppStateStatus,
     Image,
+    Keyboard
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabaseClient';
@@ -49,6 +50,11 @@ export default function ContactsScreen() {
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [searchFocused, setSearchFocused] = useState(false);
     const [loadingContacts, setLoadingContacts] = useState(false);
+
+    // recent searches (local) و key برای SecureStore
+    const RECENT_KEY = CACHE_PREFIX + 'recent_searches';
+    const [recentSearches, setRecentSearches] = useState<string[]>([]);
+    const [showSuggestions, setShowSuggestions] = useState(false);
 
     const appStateRef = useRef<AppStateStatus>(AppState.currentState as AppStateStatus);
     const searchInputRef = useRef<any>(null);
@@ -248,22 +254,64 @@ export default function ContactsScreen() {
         }
     };
 
-    // Debounced search for profiles (safe for RN)
-    const onSearch = useCallback((query: string) => {
+    // load recent searches
+    const loadRecentSearches = async () => {
+        try {
+            const raw = await SecureStore.getItemAsync(RECENT_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw) as string[];
+                setRecentSearches(parsed || []);
+            }
+        } catch (e) {
+            console.warn('loadRecentSearches error', e);
+        }
+    };
+
+    const saveRecentSearch = async (q: string) => {
+        if (!q) return;
+        try {
+            const normalized = q.trim();
+            const next = [normalized, ...recentSearches.filter(r => r !== normalized)].slice(0, 10);
+            setRecentSearches(next);
+            await SecureStore.setItemAsync(RECENT_KEY, JSON.stringify(next));
+        } catch (e) {
+            console.warn('saveRecentSearch error', e);
+        }
+    };
+
+    useEffect(() => {
+        // ...existing code...
+        loadRecentSearches();
+    }, []);
+
+    // unified search helper: debounced when immediate=false, otherwise runs now
+    const performSearch = useCallback(async (query: string, immediate = false) => {
         setSearchQuery(query);
-        if (!query.trim()) {
+        const q = query.trim();
+        if (!q) {
             setProfiles([]);
             setSearching(false);
             return;
         }
-        setSearching(true);
-        if (debounceRef.current) clearTimeout(debounceRef.current);
-        debounceRef.current = setTimeout(async () => {
-            debounceRef.current = null;
+
+        const matchLocal = (p: Profile, qnorm: string) => {
+            const qDigits = qnorm.replace(/\D/g, '');
+            const name = (p.full_name || '').toLowerCase();
+            const username = (p.username || '').toLowerCase();
+            const phone = (p.phone || '').replace(/\D/g, '');
+            return (
+                name.includes(qnorm.toLowerCase()) ||
+                username.includes(qnorm.toLowerCase()) ||
+                (qDigits && phone.includes(qDigits)) ||
+                (p.phone_digits && p.phone_digits.includes(qDigits))
+            );
+        };
+
+        const run = async () => {
+            if (!mountedRef.current) return;
+            setSearching(true);
             try {
-                // flexible search: match username or full_name or phone
-                const q = query.trim();
-                const orFilter = `username.ilike.%${q}%,full_name.ilike.%${q}%,phone.ilike.%${q}%`;
+                const orFilter = `username.ilike.%${q}%,full_name.ilike.%${q}%,phone_digits.ilike.%${q}%`;
                 const { data, error } = await supabase
                     .from('profiles')
                     .select('*')
@@ -274,23 +322,72 @@ export default function ContactsScreen() {
 
                 if (error) {
                     console.warn('search profiles error', error);
-                    if (mountedRef.current) setProfiles([]);
+                    // در صورت خطا، حداقل مخاطبین محلی (فیلتر شده) را نشان بده
+                    const localFiltered = deviceMatches.filter(d => matchLocal(d, q));
+                    setProfiles(localFiltered);
                 } else {
-                    if (mountedRef.current) setProfiles(data || []);
+                    const serverResults = (data || []) as Profile[];
+                    // فیلتر محلی نیز با همان عبارت
+                    const localFiltered = deviceMatches.filter(d => matchLocal(d, q));
+                    // ترکیب: ابتدا نتایج سرور، سپس مخاطبین محلی که در سرور نیستند (dedupe بر اساس id)
+                    const map = new Map<string, Profile>();
+                    serverResults.forEach(s => { if (s && s.id) map.set(s.id, s); });
+                    localFiltered.forEach(l => { if (l && l.id && !map.has(l.id)) map.set(l.id, l); });
+                    const merged = Array.from(map.values());
+                    setProfiles(merged);
                 }
             } catch (e) {
                 console.warn('search profiles exception', e);
-                if (mountedRef.current) setProfiles([]);
+                // اگر خطا، حداقل مخاطبین محلی فیلتر شده را نمایش بده
+                const localFiltered = deviceMatches.filter(d => {
+                    const qnorm = q.toLowerCase();
+                    return (d.full_name || '').toLowerCase().includes(qnorm) ||
+                        (d.username || '').toLowerCase().includes(qnorm) ||
+                        ((d.phone || '').replace(/\D/g, '').includes(q.replace(/\D/g, '')));
+                });
+                setProfiles(localFiltered);
             } finally {
                 if (mountedRef.current) setSearching(false);
             }
-        }, 350) as unknown as number;
-    }, [currentUser]);
+        };
+
+        if (immediate) {
+            if (debounceRef.current) {
+                clearTimeout(debounceRef.current);
+                debounceRef.current = null;
+            }
+            await run();
+        } else {
+            if (debounceRef.current) clearTimeout(debounceRef.current);
+            debounceRef.current = setTimeout(run, 350) as unknown as number;
+        }
+    }, [currentUser, deviceMatches]);
+
+    // wrapper used by TextInput
+    const onChangeSearch = (q: string) => {
+        setShowSuggestions(true);
+        performSearch(q, false);
+    };
+
+    const onSubmitSearch = (q?: string) => {
+        const query = (q ?? searchQuery).trim();
+        if (!query) return;
+        performSearch(query, true);
+        saveRecentSearch(query);
+        Keyboard.dismiss();
+        setShowSuggestions(false);
+    };
+
+    const handleSelectSuggestion = (q: string) => {
+        setSearchQuery(q);
+        onSubmitSearch(q);
+    };
 
     const clearSearchLocal = () => {
         setSearchQuery('');
         setProfiles([]);
         setSearching(false);
+        setShowSuggestions(false);
         if (searchInputRef.current) searchInputRef.current.blur?.();
         if (debounceRef.current) {
             clearTimeout(debounceRef.current);
@@ -357,37 +454,73 @@ export default function ContactsScreen() {
 
     return (
         <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
-            <View style={[styles.header, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+            <ThemedView style={[styles.header, { borderColor: colors.border, backgroundColor: colors.surface }]}>
                 <ThemedText style={styles.title}>🔍 جستجوی کاربران</ThemedText>
-                <TouchableOpacity onPress={() => { if (currentUser?.id) { checkedRef.current = false; checkDeviceContacts(currentUser.id); } }}>
-                    <ThemedText style={[styles.refreshText, { color: colors.primary }]}>بروزرسانی</ThemedText>
-                </TouchableOpacity>
-            </View>
+                <ThemedText style={styles.subtitle}>همه کاربران AfghanChat</ThemedText>
+            </ThemedView>
 
-            <View style={[styles.searchContainer, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-                <TextInput
-                    ref={searchInputRef}
-                    style={[styles.searchInput, { borderColor: colors.border, color: colors.Themedtext }]}
-                    placeholder="جستجو با نام، نام کاربری یا شماره"
-                    placeholderTextColor={colors.placeholder}
-                    value={searchQuery}
-                    onChangeText={onSearch}
-                    onFocus={() => setSearchFocused(true)}
-                    onBlur={() => setSearchFocused(false)}
-                    returnKeyType="search"
-                />
-                {searchQuery.length > 0 && (
-                    <TouchableOpacity onPress={clearSearchLocal} style={styles.clearSearch}>
-                        <ThemedText style={[styles.clearSearchText, { color: colors.primary }]}>✕</ThemedText>
-                    </TouchableOpacity>
+            {/* enhanced search bar */}
+            <ThemedView style={[styles.searchContainer, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+                <View style={styles.searchRow}>
+                    <Text style={[styles.searchIcon, { color: colors.textSecondary }]}>🔎</Text>
+                    <TextInput
+                        ref={searchInputRef}
+                        style={[styles.searchInput, { borderColor: colors.border, color: colors.text }]}
+                        placeholder="نام، نام کاربری یا شماره را وارد کنید..."
+                        placeholderTextColor={colors.placeholder}
+                        value={searchQuery}
+                        onChangeText={onChangeSearch}
+                        onFocus={() => { setSearchFocused(true); setShowSuggestions(true); }}
+                        onBlur={() => setSearchFocused(false)}
+                        returnKeyType="search"
+                        onSubmitEditing={() => onSubmitSearch()}
+                    />
+                    {searching ? (
+                        <ActivityIndicator style={styles.inputSpinner} size="small" color={colors.primary} />
+                    ) : searchQuery.length > 0 ? (
+                        <TouchableOpacity onPress={clearSearchLocal} style={styles.clearSearch}>
+                            <ThemedText style={[styles.clearSearchText, { color: colors.primary }]}>✕</ThemedText>
+                        </TouchableOpacity>
+                    ) : (
+                        <TouchableOpacity onPress={() => { setSearchQuery(''); setShowSuggestions(s => !s); }} style={styles.clearSearch}>
+                            <ThemedText style={[styles.clearSearchText, { color: colors.primary }]}>{showSuggestions ? '×' : '⋯'}</ThemedText>
+                        </TouchableOpacity>
+                    )}
+                </View>
+
+                {/* suggestions: recent searches + deviceMatches (top 5) */}
+                {showSuggestions && ((recentSearches && recentSearches.length > 0) || (deviceMatches && deviceMatches.length > 0)) && (
+                    <View style={[styles.suggestionsBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                        {recentSearches.length > 0 && (
+                            <View>
+                                <ThemedText style={styles.suggestionHeader}>جستجوهای اخیر</ThemedText>
+                                {recentSearches.map((r) => (
+                                    <TouchableOpacity key={r} style={styles.suggestionItem} onPress={() => handleSelectSuggestion(r)}>
+                                        <Text style={{ color: colors.text }}>{r}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        )}
+
+                        {deviceMatches && deviceMatches.length > 0 && (
+                            <View style={{ marginTop: recentSearches.length ? 8 : 0 }}>
+                                <ThemedText style={styles.suggestionHeader}>مخاطبین دستگاه</ThemedText>
+                                {deviceMatches.slice(0, 5).map(d => (
+                                    <TouchableOpacity key={d.id} style={styles.suggestionItem} onPress={() => startChat(d)}>
+                                        <Text style={{ color: colors.text }}>{d.full_name || d.username}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        )}
+                    </View>
                 )}
-            </View>
+            </ThemedView>
 
             {loadingContacts && (
-                <View style={styles.loadingRow}>
+                <ThemedView style={styles.loadingRow}>
                     <ActivityIndicator size="small" color={colors.primary} />
-                    <ThemedText style={{ marginLeft: 8, color: colors }}>در حال بررسی مخاطبین...</ThemedText>
-                </View>
+                    <ThemedText style={{ marginLeft: 8, color: colors.textSecondary }}>در حال بررسی مخاطبین...</ThemedText>
+                </ThemedView>
             )}
 
             <FlatList
@@ -397,11 +530,11 @@ export default function ContactsScreen() {
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
                 ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <ThemedText style={[styles.emptyText, { color: colors }]}>
+                    <ThemedView style={styles.emptyContainer}>
+                        <ThemedText style={[styles.emptyText, { color: colors.textSecondary }]}>
                             {searching ? 'در حال جستجو...' : (searchQuery ? 'نتیجه‌ای یافت نشد' : 'مخاطبی در دستگاه یافت نشد')}
                         </ThemedText>
-                    </View>
+                    </ThemedView>
                 }
             />
         </ThemedView>
@@ -412,10 +545,18 @@ const styles = StyleSheet.create({
     container: { flex: 1 },
     header: { padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1 },
     title: { fontSize: 20, fontWeight: 'bold' },
+    subtitle: { fontSize: 14 },
     refreshText: { fontSize: 14 },
     searchContainer: { padding: 12, borderBottomWidth: 1 },
-    searchInput: { height: 44, borderWidth: 1, borderRadius: 22, paddingHorizontal: 16, fontSize: 16 },
-    clearSearch: { position: 'absolute', right: 24, top: 22 },
+    searchRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        position: 'relative'
+    },
+    searchIcon: { fontSize: 16, marginRight: 8 },
+    searchInput: { flex: 1, height: 44, borderWidth: 1, borderRadius: 22, paddingHorizontal: 12, fontSize: 16 },
+    inputSpinner: { marginLeft: 10 },
+    clearSearch: { paddingHorizontal: 10 },
     clearSearchText: { fontSize: 16 },
     loadingRow: { flexDirection: 'row', alignItems: 'center', padding: 12 },
     listContent: { padding: 12 },
@@ -428,6 +569,14 @@ const styles = StyleSheet.create({
     avatarPlaceholderText: { fontSize: 18, fontWeight: '700', color: '#007AFF' },
     infoContainer: { flex: 1 },
     username: { fontSize: 16, fontWeight: 'bold' },
-    fullName: { fontSize: 13,},
+    fullName: { fontSize: 13, },
     chatButton: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: '#007AFF' },
+    suggestionsBox: {
+        marginTop: 8,
+        borderWidth: 1,
+        borderRadius: 10,
+        padding: 8
+    },
+    suggestionHeader: { fontSize: 13, fontWeight: '700', marginBottom: 6 },
+    suggestionItem: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'transparent' },
 });

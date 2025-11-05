@@ -74,6 +74,9 @@ export default function ChatRoom() {
     const soundRef = useRef<Audio.Sound | null>(null);
     const channelRef = useRef<any>(null);
     const recordingRef = useRef<Audio.Recording | null>(null);
+    const hadCacheRef = useRef<boolean>(false); // true اگر کش برای این روم پیدا شده باشد
+    const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // debounce برای ذخیره کش
+    const messagesRef = useRef<Message[]>([]); // نگهداری آخرین پیام‌ها برای ذخیره‌سازی مطمئن
     // refs for tap-toggle recording + drag-to-cancel
     const touchStartXRef = useRef<number | null>(null);
     // keep recordingRef in sync with state
@@ -90,6 +93,8 @@ export default function ChatRoom() {
                 const parsed = JSON.parse(raw) as Message[];
                 if (parsed && parsed.length > 0) {
                     setMessages(parsed);
+                    messagesRef.current = parsed;
+                    hadCacheRef.current = true; // علامت می‌زنیم که کش وجود داشته
                     return true;
                 }
             }
@@ -148,7 +153,12 @@ export default function ChatRoom() {
                     }
                 }
             })();
-            // پاکسازی
+            // پاکسازی تایمر ذخیره کش در صورت وجود
+            if (saveTimeoutRef.current) {
+                clearTimeout(saveTimeoutRef.current as any);
+                saveTimeoutRef.current = null;
+            }
+            // cleanup
             if (recordingTimerRef.current) {
                 clearInterval(recordingTimerRef.current);
             }
@@ -186,9 +196,12 @@ export default function ChatRoom() {
 
             // اول کش محلی رو سریعاً بارگزاری کن تا UI سریع باشه
             const hadCache = await loadCachedMessages(roomIdStr);
-
-            // فقط در صورتی که کش خالی است، صفحه لودینگ نشان بده
-            if (!hadCache) setLoading(true);
+            // اگر کش وجود داره از نمایش spinner جلوگیری کنیم
+            if (!hadCache) {
+                setLoading(true);
+            } else {
+                setLoading(false);
+            }
 
             // دریافت پیام‌های قبلی از سرور و بروزرسانی cache (در پس‌زمینه)
             await fetchMessages();
@@ -217,13 +230,15 @@ export default function ChatRoom() {
             if (error) throw error;
             if (data) {
                 setMessages(data as Message[]);
+                messagesRef.current = data as Message[];
                 // ذخیره روی cache
                 await saveCachedMessages(roomIdStr, data as Message[]);
             }
 
         } catch (error) {
             console.error('خطا در دریافت پیام‌ها:', error);
-            Alert.alert('خطا', 'مشکلی در دریافت پیام‌ها پیش آمد');
+            // اگر آفلاین هستیم یا خطای شبکه هست، اجازه بدهیم کش نمایش داده شده ادامه دهد (بدون نمایش Alert مزاحم)
+            console.warn('مشکل در fetchMessages (احتمالاً آفلاین):', error);
         }
     };
 
@@ -248,6 +263,7 @@ export default function ChatRoom() {
                             return prev;
                         }
                         const next = [...prev, newMessage];
+                        messagesRef.current = next;
                         // ذخیره کش بعد از دریافت پیام جدید
                         saveCachedMessages(roomIdStr, next).catch(e => console.warn('saveCachedMessages', e));
                         return next;
@@ -277,8 +293,7 @@ export default function ChatRoom() {
     const sendMessage = async () => {
         if (!newMessage.trim() || !currentUser) return;
 
-        const tempId = `temp - ${Date.now()
-            }`;
+        const tempId = `temp - ${Date.now()}`;
         const tempMessage: Message = {
             id: tempId,
             content: newMessage.trim(),
@@ -289,7 +304,11 @@ export default function ChatRoom() {
         };
 
         // اضافه کردن پیام موقت
-        setMessages(prev => [...prev, tempMessage]);
+        setMessages(prev => {
+            const next = [...prev, tempMessage];
+            messagesRef.current = next;
+            return next;
+        });
         setNewMessage('');
         scrollToBottom();
 
@@ -310,15 +329,31 @@ export default function ChatRoom() {
 
             // جایگزینی پیام موقت
             if (data && data[0]) {
-                setMessages(prev =>
-                    prev.map(msg => msg.id === tempId ? data[0] : msg)
-                );
+                // update state and ref atomically
+                setMessages(prev => {
+                    const mapped = prev.map(msg => msg.id === tempId ? data[0] : msg);
+                    messagesRef.current = mapped;
+                    return mapped;
+                });
+                // بروز رسانی کش پس از ارسال موفق (debounced)
+                if (roomIdStr) {
+                    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current as any);
+                    saveTimeoutRef.current = setTimeout(() => {
+                        // استفاده از latest messagesRef
+                        saveCachedMessages(roomIdStr, messagesRef.current).catch(e => console.warn('saveCachedMessages after send', e));
+                        saveTimeoutRef.current = null;
+                    }, 500);
+                }
             }
 
         } catch (error) {
             console.error('خطا در ارسال پیام:', error);
             // حذف پیام موقت
-            setMessages(prev => prev.filter(msg => msg.id !== tempId));
+            setMessages(prev => {
+                const filtered = prev.filter(msg => msg.id !== tempId);
+                messagesRef.current = filtered;
+                return filtered;
+            });
             Alert.alert('خطا', 'ارسال پیام موفقیت‌آمیز نبود');
         }
     };
@@ -475,6 +510,7 @@ export default function ChatRoom() {
             if (data && data[0]) {
                 setMessages(prev => {
                     const next = [...prev, data[0] as Message];
+                    messagesRef.current = next;
                     saveCachedMessages(roomIdStr, next).catch(e => console.warn('saveCachedMessages', e));
                     return next;
                 });
@@ -579,7 +615,7 @@ export default function ChatRoom() {
                     styles.messageBubble,
                     isMyMessage ? styles.myMessageBubble : styles.otherMessageBubble,
                     isAudio && styles.audioMessageBubble,
-                    { backgroundColor: chatBackground.type === 'color' ? chatBackground.value : 'رنگ پیش‌فرض' },
+                    { backgroundColor: chatBackground.type === 'color' ? chatBackground.value : colors.surface },
 
                 ]}>
                     {isAudio ? (
@@ -637,6 +673,29 @@ export default function ChatRoom() {
         );
     };
 
+    // هر بار messages تغییر کرد، آنها را به صورت debounced در SecureStore ذخیره کن
+    useEffect(() => {
+        if (!roomIdStr) return;
+        // اگر cache قبلا موجود بوده، بازنویسی آن نیز ایرادی ندارد
+        if (saveTimeoutRef.current) {
+            clearTimeout(saveTimeoutRef.current as any);
+            saveTimeoutRef.current = null;
+        }
+        saveTimeoutRef.current = setTimeout(() => {
+            // از messagesRef.current استفاده کن تا آخرین state قطعاً ذخیره شود
+            saveCachedMessages(roomIdStr, messagesRef.current).catch(e => console.warn('saveCachedMessages on messages change', e));
+            hadCacheRef.current = true;
+            saveTimeoutRef.current = null;
+        }, 800);
+
+        return () => {
+            if (saveTimeoutRef.current) {
+                clearTimeout(saveTimeoutRef.current as any);
+                saveTimeoutRef.current = null;
+            }
+        };
+    }, [messages, roomIdStr]);
+
     if (loading && messages.length === 0) {
         return (
             <View style={styles.center}>
@@ -651,7 +710,7 @@ export default function ChatRoom() {
         <KeyboardAvoidingView
             style={[styles.container, { backgroundColor: chatBackground.type === 'color' ? chatBackground.value : colors.background }]}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 145 : 70}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
         >
             <StatusBar barStyle="light-content" />
             {/* هدر */}
@@ -961,7 +1020,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'white',
         borderTopWidth: 1,
         borderTopColor: '#e9ecef',
-        paddingBottom: Platform.OS === 'ios' ? 50 : 16,
+        paddingBottom: Platform.OS === 'ios' ? 20 : 20,
     },
     textInput: {
         flex: 1,

@@ -231,7 +231,7 @@ export default function ProfileScreen() {
                         }}
                     >
                         <ThemedText style={[styles.supportButtonText, { color: colors.primary }]}>💬پشتیبانی و  خدمات دیگر</ThemedText>
-                        <ThemedText style={[styles.supportButtonSub, { color: colors }]}>سوال دارید؟ اینجا کلیک کنید</ThemedText>
+                        <ThemedText style={[styles.supportButtonSub, { color: colors.textSecondary }]}>سوال دارید؟ اینجا کلیک کنید</ThemedText>
                     </TouchableOpacity>
                 </ThemedView>
 
@@ -282,7 +282,7 @@ const styles = StyleSheet.create({
     },
     notLoggedInText: {
         fontSize: 16,
-        color: '#666',
+        color: '#020000ff',
         textAlign: 'center',
         marginBottom: 32,
         lineHeight: 24
@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
         fontWeight: 'bold'
     },
     signupButton: {
-        backgroundColor: '#f8f9fa',
+
         padding: 16,
         borderRadius: 12,
         alignItems: 'center',
