@@ -257,4 +257,12 @@ const styles = StyleSheet.create({
         color: '#999',
         textAlign: 'center',
     },
+    inputText: {
+       
+        padding: 16,
+        borderRadius: 12,
+        fontSize: 16,
+        borderWidth: 1,
+        borderColor: '#e9ecef',
+    },
 });

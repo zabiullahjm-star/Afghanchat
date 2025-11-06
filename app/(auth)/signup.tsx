@@ -1,23 +1,36 @@
+import ThemedText from '@/components/themed-text';
+import ThemedView from '@/components/themed-view';
+import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    View,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    StyleSheet,
-    Alert,
     ActivityIndicator,
+    Alert,
     KeyboardAvoidingView,
     Platform,
-    ScrollView
+    ScrollView,
+    StyleSheet,
+    TextInput,
+    TouchableOpacity
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useTheme } from '../../contexts/ThemeContext';
 import { supabase } from '../../lib/supabaseClient';
 
 export default function SignUpScreen() {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
-    const [formData, setFormData] = useState({
+    const { colors, isDark } = useTheme();
+    const placeholderColor = isDark ? '#9aa0a6' : '#9b9b9b';
+
+    // Typed form data for clarity
+    interface FormData {
+        fullName: string;
+        email: string;
+        password: string;
+        confirmPassword: string;
+        phone_digits: string;
+    }
+
+    const [formData, setFormData] = useState<FormData>({
         fullName: '',
         email: '',
         password: '',
@@ -78,7 +91,6 @@ export default function SignUpScreen() {
                     const upsertData = {
                         id: data.user.id,
                         full_name: formData.fullName.trim(),
-                        phone: formData.phone_digits.trim(),
                         phone_digits: normalizedPhoneDigits,
                         // username می‌تواند بعدا تنظیم شود
                     };
@@ -109,7 +121,7 @@ export default function SignUpScreen() {
         }
     };
 
-    const updateFormData = (field: string, value: string) => {
+    const updateFormData = (field: keyof FormData, value: string) => {
         setFormData(prev => ({
             ...prev,
             [field]: value
@@ -118,114 +130,134 @@ export default function SignUpScreen() {
 
     return (
         <KeyboardAvoidingView
-            style={styles.container}
+            style={[styles.container, { backgroundColor: colors.background }]}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
-            <ScrollView contentContainerStyle={styles.scrollContent}>
-                <View style={styles.header}>
-                    <Text style={styles.title}>حساب جدید</Text>
-                    <Text style={styles.subtitle}>ثبت‌نام در AfghanChat</Text>
-                </View>
+            <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+                <ThemedView style={styles.header}>
+                    <ThemedText style={[styles.title, { color: colors.text }]}>حساب جدید</ThemedText>
+                    <ThemedText style={[styles.subtitle, { color: colors.text }]}>ثبت‌نام در AfghanChat</ThemedText>
+                </ThemedView>
 
-                <View style={styles.form}>
-                    <View style={styles.inputContainer}>
-                        <Text style={styles.inputLabel}>نام کامل</Text>
+                <ThemedView style={[styles.form, {
+                    backgroundColor: colors.surface,
+                    padding: 18,
+                    borderRadius: 12,
+                }]}>
+                    <ThemedView style={styles.inputContainer}>
+                        <ThemedText style={[styles.inputLabel, { color: colors.text }]}>نام کامل</ThemedText>
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, { backgroundColor: isDark ? '#222' : '#f7f9fc', color: colors.text, textAlign: 'right' }]}
                             placeholder="نام. و. نام خانوادگی"
+                            placeholderTextColor={placeholderColor}
+                            accessibilityLabel="نام کامل"
                             value={formData.fullName}
                             onChangeText={(text) => updateFormData('fullName', text)}
                             autoCapitalize="words"
                             autoCorrect={false}
                         />
-                    </View>
+                    </ThemedView>
 
-                    <View style={styles.inputContainer}>
-                        <Text style={styles.inputLabel}>ایمیل</Text>
+                    <ThemedView style={styles.inputContainer}>
+                        <ThemedText style={[styles.inputLabel, { color: colors.text }]}>ایمیل</ThemedText>
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, { backgroundColor: isDark ? '#222' : '#f7f9fc', color: colors.text, textAlign: 'right' }]}
                             placeholder="example@email.com"
+                            placeholderTextColor={placeholderColor}
+                            accessibilityLabel="ایمیل"
                             value={formData.email}
                             onChangeText={(text) => updateFormData('email', text)}
                             keyboardType="email-address"
                             autoCapitalize="none"
                             autoCorrect={false}
                         />
-                    </View>
+                    </ThemedView>
 
-                    <View style={styles.inputContainer}>
-                        <Text style={styles.inputLabel}>رمز عبور</Text>
+                    <ThemedView style={styles.inputContainer}>
+                        <ThemedText style={[styles.inputLabel, { color: colors.text }]}>رمز عبور</ThemedText>
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, { backgroundColor: isDark ? '#222' : '#f7f9fc', color: colors.text, textAlign: 'right' }]}
                             placeholder="حداقل ۶ کاراکتر"
+                            placeholderTextColor={placeholderColor}
+                            accessibilityLabel="رمز عبور"
                             value={formData.password}
                             onChangeText={(text) => updateFormData('password', text)}
                             secureTextEntry
                             autoCapitalize="none"
                             autoCorrect={false}
                         />
-                    </View>
-                    <View style={styles.inputContainer}>
-                        <Text style={styles.inputLabel}>تکرار رمز عبور</Text>
+                    </ThemedView>
+                    <ThemedView style={styles.inputContainer}>
+                        <ThemedText style={[styles.inputLabel, { color: colors.text }]}>تکرار رمز عبور</ThemedText>
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, { backgroundColor: isDark ? '#222' : '#f7f9fc', color: colors.text, textAlign: 'right' }]}
                             placeholder="رمز عبور را مجدداً وارد کنید"
+                            placeholderTextColor={placeholderColor}
+                            accessibilityLabel="تکرار رمز عبور"
                             value={formData.confirmPassword}
                             onChangeText={(text) => updateFormData('confirmPassword', text)}
                             secureTextEntry
                             autoCapitalize="none"
                             autoCorrect={false}
                         />
-                    </View>
+                    </ThemedView>
 
                     {/* جدید: شماره موبایل */}
-                    <View style={styles.inputContainer}>
-                        <Text style={styles.inputLabel}>شماره موبایل</Text>
+                    <ThemedView style={styles.inputContainer}>
+                        <ThemedText style={[styles.inputLabel, { color: colors.text }]}>شماره موبایل</ThemedText>
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, { backgroundColor: isDark ? '#222' : '#f7f9fc', color: colors.text, textAlign: 'right' }]}
                             placeholder="+98 912 345 6789 یا 09123456789"
+                            placeholderTextColor={placeholderColor}
                             value={formData.phone_digits}
-                            onChangeText={(text) => updateFormData('phone', text)}
+                            onChangeText={(text) => updateFormData('phone_digits', text)}
+                            accessibilityLabel="شماره موبایل"
                             keyboardType="phone-pad"
                             autoCapitalize="none"
                             autoCorrect={false}
                         />
-                        <Text style={styles.helperText}>شماره برای جستجو و شناسایی مخاطبین ذخیره می‌شود</Text>
-                    </View>
+                        <ThemedText style={[styles.helperText, { color: colors.text }]}>شماره برای جستجو و شناسایی مخاطبین ذخیره می‌شود</ThemedText>
+                    </ThemedView>
 
                     <TouchableOpacity
-                        style={[styles.signupButton, loading && styles.buttonDisabled]}
+                        style={[styles.signupButton, loading && styles.buttonDisabled, { backgroundColor: colors.primary }]}
                         onPress={handleSignUp}
                         disabled={loading}
+                        accessibilityRole="button"
+                        accessible
+                        activeOpacity={0.85}
                     >
                         {loading ? (
-                            <ActivityIndicator color="black" />
+                            <ActivityIndicator color="white" />
                         ) : (
-                            <Text style={styles.signupButtonText}>ایجاد حساب کاربری</Text>
+                            <ThemedText style={[styles.signupButtonText, { color: '#fff' }]}>ایجاد حساب کاربری</ThemedText>
                         )}
                     </TouchableOpacity>
 
-                    <View style={styles.divider}>
-                        <View style={styles.dividerLine} />
-                        <Text style={styles.dividerText}>حساب دارید؟</Text>
-                        <View style={styles.dividerLine} />
-                    </View>
+                    <ThemedView style={styles.divider}>
+                        <ThemedView style={[styles.dividerLine, { backgroundColor: isDark ? '#333' : '#e6eefb' }]} />
+                        <ThemedText style={[styles.dividerText, { color: colors.text }]}>حساب دارید؟</ThemedText>
+                        <ThemedView style={[styles.dividerLine, { backgroundColor: isDark ? '#333' : '#e6eefb' }]} />
+                    </ThemedView>
 
                     <TouchableOpacity
-                        style={styles.loginButton}
+                        style={[styles.loginButton, { borderColor: colors.primary }]}
                         onPress={() => router.push('/login' as any)}
+                        accessibilityRole="button"
+                        accessible
+                        activeOpacity={0.8}
                     >
-                        <Text style={styles.loginButtonText}>
+                        <ThemedText style={[styles.loginButtonText, { color: colors.primary }]}>
                             ورود به حساب موجود
-                        </Text>
+                        </ThemedText>
                     </TouchableOpacity>
-                </View>
+                </ThemedView>
 
-                <View style={styles.footer}>
-                    <Text style={styles.footerText}>
+                <ThemedView style={styles.footer}>
+                    <ThemedText style={[styles.footerText, { color: colors.text }]}>
                         با ایجاد حساب با شرایط و قوانین AfghanChat موافقت می‌کنید
-                    </Text>
-                </View>
+                    </ThemedText>
+                </ThemedView>
             </ScrollView>
         </KeyboardAvoidingView>
     );
@@ -234,7 +266,7 @@ export default function SignUpScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#fff',
+
     },
     scrollContent: {
         flexGrow: 1,
@@ -249,11 +281,11 @@ const styles = StyleSheet.create({
         fontSize: 28,
         fontWeight: 'bold',
         marginBottom: 8,
-        color: '#1a1a1a',
+
     },
     subtitle: {
         fontSize: 16,
-        color: '#666',
+
         textAlign: 'center',
     },
     form: {
@@ -266,10 +298,10 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '600',
         marginBottom: 8,
-        color: '#333',
+
     },
     input: {
-        backgroundColor: '#f8f9fa',
+
         padding: 16,
         borderRadius: 12,
         fontSize: 16,
@@ -278,7 +310,7 @@ const styles = StyleSheet.create({
     },
     helperText: {
         fontSize: 12,
-        color: '#666',
+
         marginTop: 4
     },
     signupButton: {
@@ -304,7 +336,7 @@ const styles = StyleSheet.create({
     dividerLine: {
         flex: 1,
         height: 1,
-        backgroundColor: '#e9ecef',
+
     },
     dividerText: {
         paddingHorizontal: 16,
@@ -330,7 +362,7 @@ const styles = StyleSheet.create({
     },
     footerText: {
         fontSize: 12,
-        color: '#999',
+
         textAlign: 'center',
     },
 });
